@@ -153,9 +153,16 @@
    * @returns {string} Sanitized text
    */
   const sanitizeText = (text) => {
-    const temp = document.createElement("div");
-    temp.textContent = String(text ?? "");
-    return temp.innerHTML;
+    return String(text ?? "").replace(/[<>&"']/g, (char) => {
+      const entities = {
+        '<': '&lt;',
+        '>': '&gt;',
+        '&': '&amp;',
+        '"': '&quot;',
+        "'": '&#39;'
+      };
+      return entities[char] || char;
+    });
   };
 
   const cssEscape =
