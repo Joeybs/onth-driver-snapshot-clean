@@ -17,9 +17,8 @@ import {
   setHideCompleted,
   goBackToList,
   clickDriver,
-  inDriverView,
   scrollToHideAreaExport,
-} from './driver-ops. js';
+} from './driver-ops.js';
 
 // ============================================
 // ITINERARY FETCHING
@@ -44,18 +43,16 @@ export async function getItineraryJSON() {
     return null;
   }
 
-  const cached = window.__ONTH_NET__?. byId? .[String(itineraryId)];
+  const cached = window.__ONTH_NET__?. byId?.[String(itineraryId)];
   if (cached) {
     log.info("Using cached itinerary JSON");
     return cached;
   }
 
   const apiUrl =
-    `/operations/execution/api/itineraries/${itineraryId}` +
-    `?documentType=Itinerary&historicalDay=false&itineraryId=${encodeURIComponent(
+    `/operations/execution/api/itineraries/${itineraryId}? documentType=Itinerary&historicalDay=false&itineraryId=${encodeURIComponent(
       itineraryId
-    )}` +
-    `&serviceAreaId=${encodeURIComponent(serviceAreaId)}`;
+    )}&serviceAreaId=${encodeURIComponent(serviceAreaId)}`;
 
   try {
     const j = await fetch(apiUrl, { credentials: "include" })
@@ -87,8 +84,7 @@ export function buildStopAddressIndex(itinJson) {
 
   const asNum = (v) => {
     if (typeof v === "number" && Number.isFinite(v)) return v;
-    if (typeof v === "string" && v.trim() && ! Number.isNaN(Number(v)))
-      return Number(v);
+    if (typeof v === "string" && v. trim() && ! Number.isNaN(Number(v))) return Number(v);
     return null;
   };
 
@@ -179,19 +175,13 @@ export function buildStopAddressIndex(itinJson) {
         (Array.isArray(addrObj.lines) ? addrObj.lines[1] : null);
 
       const city = addrObj.city || addrObj.town || addrObj.locality;
-      const state =
-        addrObj.state || addrObj.region || addrObj.stateCode || addrObj.province;
-      const zip =
-        addrObj.zip || addrObj.zipCode || addrObj.postalCode || addrObj.postcode;
+      const state = addrObj.state || addrObj. region || addrObj.stateCode || addrObj.province;
+      const zip = addrObj.zip || addrObj.zipCode || addrObj.postalCode || addrObj.postcode;
 
       const combo = joinParts([
         line1,
         line2,
-        [city, state, zip]
-          .filter(Boolean)
-          .join(", ")
-          .replace(/\s+,/g, ",")
-          .trim(),
+        [city, state, zip].filter(Boolean).join(", ").replace(/\s+,/g, ",").trim(),
       ]);
       if (combo) return combo;
     }
@@ -211,7 +201,7 @@ export function buildStopAddressIndex(itinJson) {
   const seen = new WeakSet();
   (function walk(node) {
     if (!node || typeof node !== "object") return;
-    if (seen.has(node)) return;
+    if (seen. has(node)) return;
     seen.add(node);
 
     const stopNum = pickStopNum(node);
@@ -243,7 +233,7 @@ export function getJsonAddressForStop(stopNum, itinJson) {
     window.__ONTH_ADDRINDEX__[id] = idx;
   }
   const a = idx[String(stopNum)];
-  return a ?  cleanAddress(a) : null;
+  return a ? cleanAddress(a) : null;
 }
 
 // ============================================
@@ -262,7 +252,7 @@ function pickStopScroller() {
   if (!first)
     return document.querySelector(SELECTORS.scrollPanel) || document.scrollingElement;
 
-  let p = first.parentElement;
+  let p = first. parentElement;
   for (let i = 0; i < 14 && p; i++) {
     if (isScrollable(p)) return p;
     p = p. parentElement;
@@ -273,10 +263,7 @@ function pickStopScroller() {
 function parseStopHeader(el) {
   const box = el.closest("div") || el;
   const raw = (box.innerText || "").trim();
-  const lines = raw
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean);
+  const lines = raw.split("\n").map((s) => s.trim()).filter(Boolean);
   const textAll = lines.join(" ");
 
   let stopNum = null;
@@ -302,8 +289,8 @@ function parseStopHeader(el) {
     }
   }
 
-  const done =
-    /\bat\s*\d{1,2}:\d{2}\s*(am|pm)\b/i.test(textAll) || /\bcompleted\b/i.test(textAll);
+  const done = /\bat\s*\d{1,2}:\d{2}\s*(am|pm)\b/i.test(textAll) ||
+    /\bcompleted\b/i.test(textAll);
   return { stopNum, done };
 }
 
@@ -316,22 +303,22 @@ function findAddressInPanel(panel) {
   if (quick?. innerText?.trim()) return quick;
 
   const nodes = [... panel.querySelectorAll("div,span,p,li,td")]. filter(
-    (n) => n?.innerText?.trim()
+    (n) => n?. innerText?.trim()
   );
 
   const label = nodes.find((n) => /^address$/i.test(n.innerText. trim()));
   if (label) {
     const idx = nodes.indexOf(label);
     for (let k = idx + 1; k < Math.min(idx + 12, nodes.length); k++) {
-      const t = nodes[k].innerText. trim();
-      if (t && (/,/.test(t) || RX.zip.test(t))) return nodes[k];
+      const t = nodes[k]. innerText.trim();
+      if (t && (/,/. test(t) || RX.zip.test(t))) return nodes[k];
     }
   }
 
   return (
     nodes.find((x) => {
       const t = x.innerText || "";
-      return /,/.test(t) && (RX.zip.test(t) || /\b[A-Z]{2}\b/.test(t));
+      return /,/.test(t) && (RX.zip.test(t) || /\b[A-Z]{2}\b/. test(t));
     }) || null
   );
 }
@@ -363,8 +350,7 @@ async function locateHeaderByStopNum(stopNum) {
     h = tryFind();
     if (h) return h;
 
-    const atBottom =
-      scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 6;
+    const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 6;
     if (atBottom) break;
 
     try {
@@ -390,10 +376,10 @@ async function domExpandAndGetAddressForStop(stopNum) {
   if (header.getAttribute("aria-expanded") !== "true") {
     const r = header.getBoundingClientRect();
     const opts = {
-      bubbles: true,
+      bubbles:  true,
       cancelable: true,
-      clientX: r.left + r. width / 2,
-      clientY: r.top + r. height / 2,
+      clientX: r. left + r.width / 2,
+      clientY: r. top + r.height / 2,
     };
     header.dispatchEvent(new MouseEvent("mousedown", opts));
     header.dispatchEvent(new MouseEvent("mouseup", opts));
@@ -402,7 +388,7 @@ async function domExpandAndGetAddressForStop(stopNum) {
   }
 
   const ctrlId = header.getAttribute("aria-controls");
-  const panel = (ctrlId && document.getElementById(ctrlId)) || header. nextElementSibling;
+  const panel = (ctrlId && document.getElementById(ctrlId)) || header.nextElementSibling;
   if (!panel) {
     log.warn("Panel not found for stop:", stopNum);
     return null;
@@ -454,12 +440,11 @@ export async function collectRemainingStopsNth(nthRemaining = 5) {
     stagnant = nowSeen === lastSeen ? stagnant + 1 : 0;
     lastSeen = nowSeen;
 
-    const atBottom =
-      scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 6;
+    const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 6;
     if (atBottom && stagnant >= CONFIG. STAGNANT_THRESHOLD) break;
 
     try {
-      scroller.scrollTop += Math. max(520, scroller.clientHeight * 0.9);
+      scroller.scrollTop += Math.max(520, scroller.clientHeight * 0.9);
     } catch (err) {
       log.warn("Scroll failed:", err);
     }
@@ -523,8 +508,7 @@ export async function openToggleCopyStop(name, stopN = 5, phone = "") {
     await sleep(450);
   }
 
-  const listPanel =
-    document.querySelector(SELECTORS.scrollPanel) || document.scrollingElement;
+  const listPanel = document.querySelector(SELECTORS.scrollPanel) || document.scrollingElement;
   const savedScroll = listPanel ?  listPanel.scrollTop : null;
 
   const ok = await clickDriver(name, phone);
@@ -533,7 +517,7 @@ export async function openToggleCopyStop(name, stopN = 5, phone = "") {
     return { ok: false, address: "" };
   }
 
-  await waitFor(() => (getStopHeaders().length ?  true : null), {
+  await waitFor(() => (getStopHeaders().length ? true : null), {
     timeout: 20000,
     interval: 200,
   });
@@ -553,8 +537,7 @@ export async function openToggleCopyStop(name, stopN = 5, phone = "") {
   await sleep(300);
 
   try {
-    if (listPanel && typeof savedScroll === "number")
-      listPanel.scrollTop = savedScroll;
+    if (listPanel && typeof savedScroll === "number") listPanel.scrollTop = savedScroll;
   } catch (err) {
     log.warn("Scroll restore failed:", err);
   }
