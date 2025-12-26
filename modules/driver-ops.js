@@ -34,7 +34,7 @@ export function extractPhone(row, lines) {
   for (const i of order) {
     const L = lines[i] || "";
     if (! L || RX.time12h.test(L)) continue;
-    const m = L. match(RX.phone);
+    const m = L.match(RX. phone);
     if (m) return tidyPhone(m[1]);
   }
 
@@ -56,19 +56,12 @@ export function parseRow(row) {
   const name = firstLine(text) || "[unknown]";
   const phone = extractPhone(row, lines);
 
-  let projectedRTS =
-    readViaSel(row, SELECTORS.projectedRTS) || 
-    ((text. match(RX.rts)?.[1]) || (text.match(RX.rtsAlt)?.[1]) || "");
-  
-  let avgPerHour = readViaSel(row, SELECTORS.avgPerHour);
-  const avgMatch = text.match(RX.avg);
-  avgPerHour = avgPerHour || (avgMatch ? avgMatch[1] : null);
+  let projectedRTS = readViaSel(row, SELECTORS.projectedRTS) || one(text, RX.rts, RX.rtsAlt) || "";
+  let avgPerHour = readViaSel(row, SELECTORS. avgPerHour) || one(text, RX.avg);
   avgPerHour = typeof avgPerHour === "string" ? parseFloat(avgPerHour) : avgPerHour;
 
-  let lastHourPace = readViaSel(row, SELECTORS. lastHourPace);
-  const paceMatch = text.match(RX.pace);
-  lastHourPace = lastHourPace || (paceMatch ? paceMatch[1] : null);
-  lastHourPace = typeof lastHourPace === "string" ? parseFloat(lastHourPace) : lastHourPace;
+  let lastHourPace = readViaSel(row, SELECTORS.lastHourPace) || one(text, RX.pace);
+  lastHourPace = typeof lastHourPace === "string" ?  parseFloat(lastHourPace) : lastHourPace;
 
   let stopsLeft = null;
   {
@@ -91,23 +84,31 @@ export function parseRow(row) {
     projectedRTS,
     avgPerHour:  fix(avgPerHour),
     lastHourPace:  fix(lastHourPace),
-    stopsLeft: typeof stopsLeft === "number" ?  stopsLeft : null,
+    stopsLeft:  typeof stopsLeft === "number" ?  stopsLeft : null,
   };
+}
+
+// Helper for parseRow
+function one(t, ...rxs) {
+  t = String(t || "");
+  for (const rx of rxs) {
+    const m = t.match(rx);
+    if (m) return m[1].trim();
+  }
+  return null;
 }
 
 // ============================================
 // DRIVER COLLECTION
 // ============================================
 export async function collectAllDrivers() {
-  const panel =
-    document.querySelector(SELECTORS.scrollPanel) || document.scrollingElement;
+  const panel = document.querySelector(SELECTORS.scrollPanel) || document.scrollingElement;
   if (!panel) {
     toast("Scroll container not found", false);
     log.error("Scroll panel not found");
     return [];
   }
 
-  // Cleanup previous markers
   for (const r of document.querySelectorAll(SELECTORS.rows)) {
     if (trackedElements.has(r)) {
       trackedElements.delete(r);
@@ -125,7 +126,7 @@ export async function collectAllDrivers() {
   let lastCount = 0;
   let stagnant = 0;
 
-  for (let loops = 0; loops < CONFIG. MAX_SCROLL_LOOPS; loops++) {
+  for (let loops = 0; loops < CONFIG.MAX_SCROLL_LOOPS; loops++) {
     const rows = [... document.querySelectorAll(SELECTORS.rows)];
     for (const row of rows) {
       if (trackedElements.has(row)) continue;
@@ -134,9 +135,8 @@ export async function collectAllDrivers() {
       await sleep(18);
     }
 
-    const atBottom =
-      panel.scrollTop + panel.clientHeight >= panel. scrollHeight - 6;
-    stagnant = out.length === lastCount ?  stagnant + 1 : 0;
+    const atBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 6;
+    stagnant = out.length === lastCount ?  stagnant + 1 :  0;
     lastCount = out.length;
 
     if (atBottom && stagnant >= CONFIG. STAGNANT_THRESHOLD) {
@@ -167,7 +167,7 @@ function clickAtCenter(el) {
 
 function dblClickAtCenter(el) {
   const r = el.getBoundingClientRect();
-  const x = r.left + r.width / 2,
+  const x = r.left + r. width / 2,
     y = r.top + r.height / 2;
   const opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, detail: 2 };
   el.dispatchEvent(new MouseEvent("mousedown", opts));
@@ -242,17 +242,14 @@ function rowMatches(row, targetName, targetPhone) {
   const want = digits(targetPhone);
   if (! want) return true;
   const got = digits(row?.innerText || "");
-  return got.includes(want);
+  return got. includes(want);
 }
 
 async function findRowByNameScrolling(name, phone, { maxLoops = 200 } = {}) {
-  const panel =
-    document.querySelector(SELECTORS.scrollPanel) || document.scrollingElement;
-  if (! panel) return null;
+  const panel = document.querySelector(SELECTORS.scrollPanel) || document.scrollingElement;
+  if (!panel) return null;
 
-  let row = [... document.querySelectorAll(ROW_SEL)].find((r) =>
-    rowMatches(r, name, phone)
-  );
+  let row = [... document.querySelectorAll(ROW_SEL)].find((r) => rowMatches(r, name, phone));
   if (row) return row;
 
   const saved = panel.scrollTop;
@@ -264,13 +261,10 @@ async function findRowByNameScrolling(name, phone, { maxLoops = 200 } = {}) {
   await sleep(CONFIG.BASE_SLEEP);
 
   for (let loops = 0; loops < maxLoops; loops++) {
-    row = [...document.querySelectorAll(ROW_SEL)].find((r) =>
-      rowMatches(r, name, phone)
-    );
+    row = [...document.querySelectorAll(ROW_SEL)].find((r) => rowMatches(r, name, phone));
     if (row) return row;
 
-    const atBottom =
-      panel.scrollTop + panel.clientHeight >= panel. scrollHeight - 6;
+    const atBottom = panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 6;
     if (atBottom) break;
 
     panel.scrollTop += Math.max(260, panel.clientHeight * 0.9);
@@ -341,9 +335,7 @@ async function clickDriverExact(row) {
 }
 
 export async function clickDriver(name, phone) {
-  const rowNow = [... document.querySelectorAll(ROW_SEL)].find((r) =>
-    rowMatches(r, name, phone)
-  );
+  const rowNow = [... document.querySelectorAll(ROW_SEL)].find((r) => rowMatches(r, name, phone));
   if (rowNow) return clickDriverExact(rowNow);
   const row = await findRowByNameScrolling(name, phone);
   if (row) return clickDriverExact(row);
@@ -366,9 +358,7 @@ function findHideToggle() {
     ),
   ];
   el = cands.find((e) =>
-    /hide completed stops/i.test(
-      e.closest("label,div,span,section,form")?.textContent || ""
-    )
+    /hide completed stops/i.test(e.closest("label,div,span,section,form")?.textContent || "")
   );
   return el || null;
 }
@@ -399,9 +389,7 @@ async function scrollToHideArea() {
   const search =
     document.querySelector('input[placeholder="Search..."]') ||
     [... document.querySelectorAll("input,button,[role='switch']")].find((n) =>
-      /hide completed stops/i.test(
-        n.closest("label,div,span,section,form")?.textContent || ""
-      )
+      /hide completed stops/i.test(n.closest("label,div,span,section,form")?.textContent || "")
     );
   if (search) {
     search.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -414,7 +402,7 @@ async function scrollToHideArea() {
 }
 
 export async function setHideCompleted(want) {
-  const el = await waitFor(findHideToggle, { timeout:  9000, interval: 150 });
+  const el = await waitFor(findHideToggle, { timeout: 9000, interval: 150 });
   if (!el) {
     log.warn("Hide toggle not found");
     return false;
@@ -453,9 +441,7 @@ export async function goBackToList() {
           el.textContent ||
           ""
         ).trim();
-        return (
-          /^(back|return|go back|back to list)$/i.test(t) || /\bback\b/i.test(t)
-        );
+        return /^(back|return|go back|back to list)$/i.test(t) || /\bback\b/i.test(t);
       }) || null
     );
   };
@@ -479,7 +465,7 @@ export async function goBackToList() {
 
   try {
     history.back();
-    log.info("Used history.back()");
+    log.info("Used history. back()");
   } catch (err) {
     log.error("history.back() failed:", err);
   }
