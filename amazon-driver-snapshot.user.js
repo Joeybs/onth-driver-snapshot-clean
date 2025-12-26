@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Amazon Driver Snapshot (IN-PAGE Drawer + Copy Nth Remaining Stop Address + Auto-Back)
+// @name         Amazon Driver Snapshot
 // @namespace    https://github.com/onth/scripts
 // @version      2.1.0
 // @description  In-page Driver Snapshot drawer. Click driver → open itinerary → hide completed → copy Nth *remaining* stop address (default 5) → auto-back. Optimized for performance, reliability, and security.
