@@ -1,0 +1,178 @@
+// modules/ui.js
+// UI layer - drawer, table rendering, event handling
+
+import {
+  CONFIG,
+  log,
+  toast,
+  LRUCache,
+  globalMutex,
+  cssEscape,
+  copyText,
+} from './core.js';
+import { collectAllDrivers } from './driver-ops.js';
+import { openToggleCopyStop } from './address-ops.js';
+
+// ============================================
+// UI STATE
+// ============================================
+export const UI = {
+  open: false,
+  data: [],
+  view: [],
+  sortKey: "name",
+  sortDir: "asc",
+  filter: "",
+  busy: false,
+  stopN: CONFIG.DEFAULT_STOP_N,
+  addrByKey: new LRUCache(CONFIG.MAX_CACHE_SIZE),
+  pendingKey: null,
+  openKey: null,
+};
+
+// ============================================
+// STYLES
+// ============================================
+const STYLES = `
+  #__onth_snap_btn__{
+    position: fixed; top:12px; right:12px; z-index:2147483647;
+    padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,. 14);
+    background:rgba(2,6,23,. 82); color:#e5e7eb; cursor:pointer; font-weight:800;
+    box-shadow:0 10px 30px rgba(0,0,0,.35); backdrop-filter:  blur(10px);
+  }
+  #__onth_snap_btn__: hover{ transform:  translateY(-1px); }
+  #__onth_snap_drawer__{
+    position:fixed; top:64px; right:12px; width:440px; max-width:calc(100vw - 24px);
+    height:  calc(100vh - 92px); z-index:2147483646;
+    background:  rgba(2,6,23,. 86); color:#e5e7eb;
+    border: 1px solid rgba(255,255,255,. 12);
+    border-radius: 16px; box-shadow:  0 18px 60px rgba(0,0,0,.5);
+    overflow:hidden; display:none; backdrop-filter: blur(12px);
+  }
+  #__onth_snap_drawer__. open{ display:flex; flex-direction:column; }
+  #__onth_snap_head__{
+    padding:12px 12px 10px; border-bottom:1px solid rgba(255,255,255,.10);
+    display:flex; align-items:center; gap:10px;
+  }
+  #__onth_snap_title__{ font-weight:900; }
+  #__onth_snap_count__{ margin-left:auto; font-size:12px; color: rgba(226,232,240,.75); }
+  #__onth_snap_controls__{
+    padding:10px 12px; display:flex; gap:8px; align-items:center;
+    border-bottom:1px solid rgba(255,255,255,.10);
+  }
+  #__onth_snap_controls__ input{
+    background:  rgba(15,23,42,.75); color:#e5e7eb;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius:10px; padding:8px 10px; font-size:13px; outline:none;
+  }
+  #__onth_snap_filter__{ flex: 1; }
+  #__onth_snap_stop__{ width:86px; text-align:center; }
+  #__onth_snap_refresh__{
+    background:#2563eb; border:0; color:#fff; border-radius:10px;
+    padding:8px 10px; font-weight:900; cursor:pointer;
+  }
+  #__onth_snap_close__{
+    margin-left:6px; background:  rgba(15,23,42,.75);
+    border:1px solid rgba(255,255,255,.12); color:#e5e7eb;
+    border-radius:10px; padding:8px 10px; font-weight:900; cursor:pointer;
+  }
+  #__onth_snap_tablewrap__{ flex: 1; overflow:auto; }
+  #__onth_snap_table__{ width:100%; border-collapse:collapse; }
+  #__onth_snap_table__ thead th{
+    position:sticky; top:0; background:  rgba(2,6,23,.95);
+    padding:10px 10px; font-size:12px; color:rgba(148,163,184,.95);
+    text-align:left; cursor:pointer; border-bottom:1px solid rgba(255,255,255,.10);
+    user-select:none;
+  }
+  #__onth_snap_table__ tbody td{
+    padding:10px 10px; border-bottom:1px solid rgba(255,255,255,.06);
+    font-size:13px; vertical-align:top;
+  }
+  #__onth_snap_table__ tbody tr:hover{ background: rgba(255,255,255,.04); }
+  .__onth_mono{ font-variant-numeric: tabular-nums; }
+  .__onth_row{ cursor:pointer; }
+  .__onth_name{ font-weight:900; }
+  .__onth_detail{
+    background: rgba(15,23,42,.35);
+    border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  .__onth_detailBox{ padding:10px 10px 12px; display:grid; gap:8px; }
+  .__onth_kv{ display:grid; grid-template-columns:86px 1fr; gap:6px 10px; }
+  .__onth_k{ color: rgba(148,163,184,. 95); font-size:12px; }
+  .__onth_v{ color:#e5e7eb; font-size:13px; word-break:break-word; }
+  .__onth_pills{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .__onth_pillNoBg{ border: 0 !important; background:  transparent ! important; padding:0 !important; box-shadow:none !important; }
+  .__onth_btn{
+    border:1px solid rgba(255,255,255,.16);
+    background: transparent;
+    color:#e5e7eb;
+    padding:8px 10px;
+    border-radius:10px;
+    font-weight:900;
+    cursor:pointer;
+  }
+  .__onth_btn:hover{ background:  rgba(255,255,255,. 06); }
+  .__onth_btn: active{ transform:  translateY(1px); }
+  .__onth_btnPrimary{ border-color:  rgba(59,130,246,.45); }
+  .__onth_btnPrimary:hover{ background: rgba(37,99,235,.16); }
+  .__onth_btnSmall{ padding:6px 8px; border-radius:9px; font-size:12px; font-weight:900; }
+`;
+
+// ============================================
+// DRAWER CONTROL
+// ============================================
+export function openDrawer() {
+  UI.open = true;
+  document.getElementById("__onth_snap_drawer__")?.classList.add("open");
+}
+
+export function closeDrawer() {
+  UI.open = false;
+  document.getElementById("__onth_snap_drawer__")?.classList.remove("open");
+}
+
+// ============================================
+// FORMATTING
+// ============================================
+function fmt(v) {
+  return typeof v === "number" && !Number.isNaN(v)
+    ? Number.isInteger(v)
+      ? String(v)
+      : v.toFixed(1)
+    : "";
+}
+
+// ============================================
+// VIEW MANAGEMENT
+// ============================================
+export function rebuildView() {
+  const f = String(UI.filter || "").toLowerCase().trim();
+  let v = UI.data.slice();
+  if (f) {
+    v = v.filter(
+      (r) =>
+        String(r.name || "").toLowerCase().includes(f) ||
+        String(r.number || "").toLowerCase().includes(f)
+    );
+  }
+
+  const k = UI.sortKey;
+  const dir = UI.sortDir;
+
+  v.sort((a, b) => {
+    const va = a[k],
+      vb = b[k];
+    const na = typeof va === "number",
+      nb = typeof vb === "number";
+    let c = 0;
+    if (na && nb) c = va - vb;
+    else
+      c = String(va || "").localeCompare(String(vb || ""), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    return dir === "asc" ? c : -c;
+  });
+
+  UI.view = v;
+  const countEl = document.getElementByI
