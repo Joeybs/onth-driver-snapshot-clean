@@ -1040,17 +1040,25 @@
    * @returns {object} Itinerary parameters
    */
   function getItinParamsFromUrl() {
-    try {
-      const u = new URL(location.href);
-      return {
-        itineraryId: u.searchParams.get("itineraryId"),
-        serviceAreaId: u.searchParams.get("serviceAreaId"),
-      };
-    } catch (err) {
-      log.warn("URL params parsing failed:", err);
-      return { itineraryId: null, serviceAreaId: null };
-    }
+  try {
+    const u = new URL(location.href);
+    
+    // Extract itineraryId from URL path:  /itineraries/{id}/
+    const pathMatch = u.pathname.match(/\/itineraries\/([^/]+)\//);
+    const itineraryId = pathMatch? .[1] || null;
+    
+    // Extract serviceAreaId from query params
+    const serviceAreaId = u.searchParams. get("serviceAreaId");
+    
+    return {
+      itineraryId,
+      serviceAreaId,
+    };
+  } catch (err) {
+    log.warn("URL params parsing failed:", err);
+    return { itineraryId: null, serviceAreaId: null };
   }
+}
 
   /**
    * Fetch itinerary JSON from API with timeout and caching
