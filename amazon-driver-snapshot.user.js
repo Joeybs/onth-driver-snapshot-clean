@@ -67,6 +67,9 @@
     BASE_SLEEP: 50,
     SCROLL_DELAY: 120,
     ROW_PROCESS_DELAY: 0,
+    INITIAL_WAIT_DELAY: 200,
+    MIN_SCROLL_AMOUNT: 260,
+    SCROLL_MULTIPLIER: 1.2,
     RETRY_ATTEMPTS: 3,
     DEBOUNCE_DELAY: 300,
     FETCH_TIMEOUT: 15000,
@@ -625,7 +628,7 @@
       log.warn("Failed to scroll to top:", err);
       panel.scrollTop = 0;
     }
-    await sleep(200);
+    await sleep(CONFIG.INITIAL_WAIT_DELAY);
 
     const out = [];
     let lastCount = 0;
@@ -652,7 +655,7 @@
         break;
       }
 
-      const scrollAmount = Math.max(260, panel.clientHeight * 1.2);
+      const scrollAmount = Math.max(CONFIG.MIN_SCROLL_AMOUNT, panel.clientHeight * CONFIG.SCROLL_MULTIPLIER);
       try {
         await smoothScrollTo(panel, panel.scrollTop + scrollAmount);
       } catch (err) {
