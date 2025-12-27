@@ -1938,7 +1938,7 @@
       { key: "projectedRTS", label: "Projected RTS" },
       { key: "stopsLeft", label: "Stops Left" },
       { key: "avgPerHour", label: "Stops/hr" },
-      { key: "lastHourPace", label: "Pace" }
+      { key: "lastHourPace", label: "Last Hour" }
     ];
 
     for (const h of headers) {
