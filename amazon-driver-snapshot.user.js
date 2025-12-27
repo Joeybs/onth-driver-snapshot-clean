@@ -225,16 +225,25 @@
       clearTimeout(timeoutId);
       
       // Only retry on actual failures, not on success
-      if (!response.ok && retries > 0) {
-        log.warn(`Fetch failed (${response.status}), retrying...`);
-        await sleep(500);
-        return fetchWithTimeout(url, options, timeout, retries - 1);
+      if (!response.ok) {
+        if (retries > 0) {
+          log.warn(`Fetch failed (${response.status}), retrying...`);
+          await sleep(500);
+          return fetchWithTimeout(url, options, timeout, retries - 1);
+        }
+        // No retries left, throw error for failed response
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
       // Return immediately on success - no unnecessary retries
       return response;
     } catch (error) {
       clearTimeout(timeoutId);
+      
+      // Don't retry if this is already a thrown HTTP error
+      if (error.message?.startsWith('HTTP ')) {
+        throw error;
+      }
       
       // Only retry on network errors or timeouts
       if (error.name === 'AbortError' && retries > 0) {
