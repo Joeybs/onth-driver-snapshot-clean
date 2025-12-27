@@ -1183,10 +1183,10 @@
     return { remaining, target: remaining[want - 1] || null };
   }
 
-  async function copyNthRemainingStopAddress(nthRemaining = 5) {
+  async function copyNthRemainingStopAddress(nthRemaining = 3) {
     perf.start('copyNthRemainingStopAddress');
     
-    const want = Math.max(1, Number(nthRemaining) || 5);
+    const want = Math.max(1, Number(nthRemaining) || 3);
     const { target } = await collectRemainingStopsNth(want);
     if (!target?.stopNum) {
       log.warn("No target stop found");
