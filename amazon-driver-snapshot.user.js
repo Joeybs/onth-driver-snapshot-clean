@@ -1036,6 +1036,7 @@
   }
 
 
+ /**
  * Get itinerary parameters from current URL
  * @returns {object} Itinerary parameters
  */
