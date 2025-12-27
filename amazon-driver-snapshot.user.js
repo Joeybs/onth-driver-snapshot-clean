@@ -1210,10 +1210,13 @@
     }
 
     await window.ONTH_copyText(full);
-    log.info("Copied from DOM:", full);
-    perf.end('copyNthRemainingStopAddress');
-    return { stopNum: target.stopNum, full, raw: target, source: "dom" };
-  }
+log.info("Copied from DOM:", full);
+
+// 👇 ADD THIS LINE
+await goBackToList();
+
+perf.end('copyNthRemainingStopAddress');
+return { stopNum: target.stopNum, full, raw: target, source: "dom" };
 
   async function goBackToList() {
     if (document.querySelector(ROW_SEL)) {
