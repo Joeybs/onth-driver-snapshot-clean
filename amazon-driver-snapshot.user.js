@@ -12,7 +12,7 @@
 
 /**
  * Amazon Driver Snapshot Userscript
- * 
+ *
  * Performance optimizations:
  * - Debounced input handlers to reduce unnecessary updates
  * - RequestAnimationFrame for smooth scrolling
@@ -20,19 +20,19 @@
  * - LRU cache for address data
  * - Performance monitoring with debug mode
  * - Single-pass address cleaning (no redundant processing)
- * 
+ *
  * Reliability improvements:
  * - Comprehensive error handling with try-catch blocks
  * - Input validation and sanitization
  * - Fetch timeout and retry mechanisms
  * - Memory leak prevention with cleanup system
- * 
+ *
  * Security enhancements:
  * - XSS prevention through text sanitization
  * - Input validation on user entries
  * - Safe clipboard operations with fallbacks
  * - Proper event listener cleanup
- * 
+ *
  * Enable debug mode: window.__ONTH_DEBUG__ = true
  */
 
@@ -63,8 +63,13 @@
     MAX_CACHE_SIZE: 500,
     DEFAULT_STOP_N: 5,
     MAX_SCROLL_LOOPS: 160,
-    STAGNANT_THRESHOLD: 7,
-    BASE_SLEEP: 120,
+    STAGNANT_THRESHOLD: 3,
+    BASE_SLEEP: 50,
+    SCROLL_DELAY: 120,
+    ROW_PROCESS_DELAY: 0,
+    INITIAL_WAIT_DELAY: 200,
+    MIN_SCROLL_AMOUNT: 260,
+    SCROLL_MULTIPLIER: 1.2,
     RETRY_ATTEMPTS: 3,
     DEBOUNCE_DELAY: 300,
     FETCH_TIMEOUT: 15000,
@@ -102,7 +107,7 @@
       .replace(/^[^\d+]*(\+?[\d(].*)$/, "$1")
       .replace(/\s{2,}/g, " ")
       .trim();
-  
+
   /**
    * Debounce function execution
    * @param {Function} fn - Function to debounce
@@ -116,7 +121,7 @@
       timeoutId = setTimeout(() => fn.apply(this, args), delay);
     };
   };
-  
+
   /**
    * Throttle function execution
    * @param {Function} fn - Function to throttle
@@ -133,7 +138,7 @@
       }
     };
   };
-  
+
   /**
    * Validate and sanitize stop number input
    * @param {*} value - Input value
@@ -146,7 +151,7 @@
     }
     return Math.max(CONFIG.MIN_STOP_NUMBER, Math.min(CONFIG.MAX_STOP_NUMBER, Math.floor(num)));
   };
-  
+
   /**
    * Sanitize text input to prevent XSS
    * @param {string} text - Input text
@@ -186,7 +191,7 @@
       if (window.__ONTH_DEBUG__) console.log(`[ONTH DEBUG] ${msg}`, ...args);
     },
   };
-  
+
   /**
    * Performance monitoring utility
    */
@@ -207,7 +212,7 @@
       return null;
     },
   };
-  
+
   /**
    * Fetch with timeout and retry support
    * @param {string} url - URL to fetch
@@ -219,21 +224,21 @@
   const fetchWithTimeout = async (url, options = {}, timeout = CONFIG.FETCH_TIMEOUT, retries = CONFIG.RETRY_ATTEMPTS) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
-    
+
     try {
       const response = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(timeoutId);
-      
+
       if (!response.ok && retries > 0) {
         log.warn(`Fetch failed (${response.status}), retrying...`);
         await sleep(500);
         return fetchWithTimeout(url, options, timeout, retries - 1);
       }
-      
+
       return response;
     } catch (error) {
       clearTimeout(timeoutId);
-      
+
       if (error.name === 'AbortError') {
         log.error('Fetch timeout:', url);
         if (retries > 0) {
@@ -242,7 +247,7 @@
           return fetchWithTimeout(url, options, timeout, retries - 1);
         }
       }
-      
+
       throw error;
     }
   };
@@ -326,15 +331,29 @@
         d.setAttribute("aria-live", "polite");
         d.style.cssText = [
           "position:fixed;right:16px;bottom:16px;z-index:2147483647",
-          "background:#0b1220;color:#e5e7eb;border:1px solid rgba(255,255,255,.12)",
-          "padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(10px)",
-          "transition:.18s;pointer-events:none;max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
-          "box-shadow:0 10px 30px rgba(0,0,0,.35)",
+          "background:linear-gradient(135deg, rgba(15,23,42,.96), rgba(2,6,23,.94))",
+          "color:#e5e7eb;border:1px solid rgba(59,130,246,.3)",
+          "padding:12px 16px;border-radius:12px;opacity:0;transform:translateY(10px)",
+          "transition:all 250ms cubic-bezier(0.4, 0, 0.2, 1);pointer-events:none",
+          "max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
+          "box-shadow:0 8px 24px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.05)",
+          "backdrop-filter:blur(12px);font-size:13px;font-weight:600",
         ].join(";");
         document.body.appendChild(d);
       }
-      const icon = ok === true ? "✅ " : ok === false ? "❌ " : "🟦 ";
-      d.textContent = icon + sanitizeText(String(msg ?? ""));
+
+      // Update border and icon based on status
+      if (ok === true) {
+        d.style.borderColor = "rgba(34,197,94,.4)";
+        d.textContent = "✅ " + sanitizeText(String(msg ?? ""));
+      } else if (ok === false) {
+        d.style.borderColor = "rgba(239,68,68,.4)";
+        d.textContent = "❌ " + sanitizeText(String(msg ?? ""));
+      } else {
+        d.style.borderColor = "rgba(59,130,246,.35)";
+        d.textContent = "ℹ️ " + sanitizeText(String(msg ?? ""));
+      }
+
       d.style.opacity = "1";
       d.style.transform = "translateY(0)";
       clearTimeout(d.__t);
@@ -398,7 +417,7 @@
       log.warn("Attempted to copy empty text");
       return false;
     }
-    
+
     // Method 1: Modern Clipboard API
     try {
       await navigator.clipboard.writeText(text);
@@ -406,7 +425,7 @@
     } catch (err) {
       log.warn("Clipboard API failed:", err);
     }
-    
+
     // Method 2: execCommand (deprecated but still works)
     try {
       const ta = document.createElement("textarea");
@@ -422,7 +441,7 @@
     } catch (err) {
       log.warn("execCommand copy failed:", err);
     }
-    
+
     // Method 3: Legacy copy function
     try {
       if (typeof copy === "function") {
@@ -432,7 +451,7 @@
     } catch (err) {
       log.warn("copy() function failed:", err);
     }
-    
+
     return false;
   };
 
@@ -449,7 +468,7 @@
    */
   function extractPhone(row, lines) {
     if (!row) return "";
-    
+
     try {
       const tel = row.querySelector('a[href^="tel:"]');
       if (tel) {
@@ -457,7 +476,7 @@
         const fromHref = href.replace(/^tel:/i, "").trim();
         if (fromHref) return tidyPhone(fromHref);
       }
-      
+
       const order = [1, 2, 0, 3];
       for (const i of order) {
         const L = lines?.[i] ?? "";
@@ -465,7 +484,7 @@
         const m = L.match(RX.phone);
         if (m) return tidyPhone(m[1]);
       }
-      
+
       const all = lines.join("  ");
       if (!RX.time12h.test(all)) {
         const m = all.match(RX.phone);
@@ -474,7 +493,7 @@
     } catch (err) {
       log.warn("extractPhone error:", err);
     }
-    
+
     return "";
   }
 
@@ -540,7 +559,7 @@
 
   // DOM element tracking for cleanup
   const trackedElements = new WeakMap();
-  
+
   /**
    * Smoothly scroll element using requestAnimationFrame
    * @param {HTMLElement} element - Element to scroll
@@ -553,30 +572,30 @@
         resolve();
         return;
       }
-      
+
       const start = element.scrollTop;
       const distance = target - start;
       const duration = 300; // ms
       const startTime = performance.now();
-      
+
       const animate = (currentTime) => {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / duration, 1);
-        
+
         // Easing function
         const easeProgress = progress < 0.5
           ? 2 * progress * progress
           : -1 + (4 - 2 * progress) * progress;
-        
+
         element.scrollTop = start + distance * easeProgress;
-        
+
         if (progress < 1) {
           requestAnimationFrame(animate);
         } else {
           resolve();
         }
       };
-      
+
       requestAnimationFrame(animate);
     });
   };
@@ -587,7 +606,7 @@
    */
   async function collectAllDrivers() {
     perf.start('collectAllDrivers');
-    
+
     const panel =
       document.querySelector(SELECTORS.scrollPanel) || document.scrollingElement;
     if (!panel) {
@@ -609,7 +628,7 @@
       log.warn("Failed to scroll to top:", err);
       panel.scrollTop = 0;
     }
-    await sleep(CONFIG.BASE_SLEEP * 4);
+    await sleep(CONFIG.INITIAL_WAIT_DELAY);
 
     const out = [];
     let lastCount = 0;
@@ -621,7 +640,9 @@
         if (trackedElements.has(row)) continue;
         trackedElements.set(row, true);
         out.push(parseRow(row));
-        await sleep(18);
+        if (CONFIG.ROW_PROCESS_DELAY > 0) {
+          await sleep(CONFIG.ROW_PROCESS_DELAY);
+        }
       }
 
       const atBottom =
@@ -634,14 +655,14 @@
         break;
       }
 
-      const scrollAmount = Math.max(260, panel.clientHeight * 0.9);
+      const scrollAmount = Math.max(CONFIG.MIN_SCROLL_AMOUNT, panel.clientHeight * CONFIG.SCROLL_MULTIPLIER);
       try {
         await smoothScrollTo(panel, panel.scrollTop + scrollAmount);
       } catch (err) {
         log.warn("Smooth scroll failed, using fallback:", err);
         panel.scrollTop += scrollAmount;
       }
-      await sleep(360);
+      await sleep(CONFIG.SCROLL_DELAY);
     }
 
     perf.end('collectAllDrivers');
@@ -1163,7 +1184,7 @@
 
   async function copyNthRemainingStopAddress(nthRemaining = 5) {
     perf.start('copyNthRemainingStopAddress');
-    
+
     const want = Math.max(1, Number(nthRemaining) || 5);
     const { target } = await collectRemainingStopsNth(want);
     if (!target?.stopNum) {
@@ -1176,7 +1197,7 @@
 
     // Use DOM-based address retrieval
     const domAddr = await domExpandAndGetAddressForStop(target.stopNum);
-    
+
     if (!domAddr) {
       log.warn("No DOM address found");
       perf.end('copyNthRemainingStopAddress');
@@ -1311,87 +1332,212 @@
 
   const STYLES = `
   #__onth_snap_btn__ {
-    position:  fixed; top: 12px; right:  12px; z-index:  2147483647;
-    padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,. 14);
-    background:  rgba(2,6,23,. 82); color: #e5e7eb; cursor: pointer; font-weight: 800;
-    box-shadow: 0 10px 30px rgba(0,0,0,.35); backdrop-filter: blur(10px);
+    position: fixed; top: 12px; right: 12px; z-index: 2147483647;
+    padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(59,130,246,.35);
+    background: linear-gradient(135deg, rgba(37,99,235,.92), rgba(29,78,216,.88));
+    color: #fff; cursor: pointer; font-weight: 800; font-size: 13px;
+    box-shadow: 0 4px 12px rgba(37,99,235,.35), 0 8px 24px rgba(0,0,0,.25);
+    backdrop-filter: blur(10px);
+    transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
   }
-  #__onth_snap_btn__: hover { transform: translateY(-1px); }
+  #__onth_snap_btn__:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(37,99,235,.45), 0 12px 32px rgba(0,0,0,.3);
+    background: linear-gradient(135deg, rgba(59,130,246,.95), rgba(37,99,235,.92));
+  }
+  #__onth_snap_btn__:active {
+    transform: translateY(0);
+    transition: all 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
   #__onth_snap_drawer__ {
-    position: fixed; top:  64px; right: 12px; width: 440px; max-width: calc(100vw - 24px);
+    position: fixed; top: 64px; right: 12px; width: 440px; max-width: calc(100vw - 24px);
     height: calc(100vh - 92px); z-index: 2147483646;
-    background: rgba(2,6,23,.86); color: #e5e7eb;
-    border: 1px solid rgba(255,255,255,.12);
-    border-radius: 16px; box-shadow: 0 18px 60px rgba(0,0,0,.5);
-    overflow: hidden; display: none; backdrop-filter: blur(12px);
+    background: linear-gradient(145deg, rgba(15,23,42,.94), rgba(2,6,23,.92));
+    color: #e5e7eb;
+    border: 1px solid rgba(59,130,246,.2);
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.05);
+    overflow: hidden; display: none;
+    backdrop-filter: blur(16px);
   }
-  #__onth_snap_drawer__.open{ display:flex; flex-direction:column; }
-  #__onth_snap_head__{
-    padding:12px 12px 10px; border-bottom:1px solid rgba(255,255,255,.10);
-    display:flex; align-items:center; gap:10px;
+  #__onth_snap_drawer__.open { display: flex; flex-direction: column; }
+  #__onth_snap_head__ {
+    padding: 14px 16px 12px;
+    border-bottom: 1px solid rgba(59,130,246,.15);
+    background: rgba(30,41,59,.4);
+    display: flex; align-items: center; gap: 10px;
   }
-  #__onth_snap_title__{ font-weight:900; }
-  #__onth_snap_count__{ margin-left:auto; font-size:12px; color:rgba(226,232,240,.75); }
-  #__onth_snap_controls__{
-    padding:10px 12px; display:flex; gap:8px; align-items:center;
-    border-bottom:1px solid rgba(255,255,255,.10);
+  #__onth_snap_title__ {
+    font-weight: 900;
+    font-size: 15px;
+    color: #f1f5f9;
+    letter-spacing: -0.01em;
   }
-  #__onth_snap_controls__ input{
-    background: rgba(15,23,42,.75); color:#e5e7eb;
-    border:1px solid rgba(255,255,255,.12);
-    border-radius:10px; padding:8px 10px; font-size:13px; outline:none;
+  #__onth_snap_count__ {
+    margin-left: auto;
+    font-size: 12px;
+    color: rgba(148,163,184,.85);
+    font-weight: 600;
   }
-  #__onth_snap_filter__{ flex:1; }
-  #__onth_snap_stop__{ width:86px; text-align:center; }
-  #__onth_snap_refresh__{
-    background:#2563eb; border:0; color:#fff; border-radius:10px;
-    padding:8px 10px; font-weight:900; cursor:pointer;
+  #__onth_snap_controls__ {
+    padding: 12px 16px;
+    display: flex; gap: 8px; align-items: center;
+    border-bottom: 1px solid rgba(59,130,246,.12);
+    background: rgba(30,41,59,.25);
   }
-  #__onth_snap_close__{
-    margin-left:6px; background: rgba(15,23,42,.75);
-    border:1px solid rgba(255,255,255,.12); color:#e5e7eb;
-    border-radius:10px; padding:8px 10px; font-weight:900; cursor:pointer;
+  #__onth_snap_controls__ input {
+    background: rgba(30,41,59,.6);
+    color: #e5e7eb;
+    border: 1px solid rgba(59,130,246,.25);
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-size: 13px;
+    outline: none;
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
   }
-  #__onth_snap_tablewrap__{ flex:1; overflow:auto; }
-  #__onth_snap_table__{ width:100%; border-collapse:collapse; }
-  #__onth_snap_table__ thead th{
-    position:sticky; top:0; background: rgba(2,6,23,.95);
-    padding:10px 10px; font-size:12px; color:rgba(148,163,184,.95);
-    text-align:left; cursor:pointer; border-bottom:1px solid rgba(255,255,255,.10);
-    user-select:none;
+  #__onth_snap_controls__ input:focus {
+    border-color: rgba(59,130,246,.5);
+    background: rgba(30,41,59,.75);
+    box-shadow: 0 0 0 3px rgba(59,130,246,.1);
   }
-  #__onth_snap_table__ tbody td{
-    padding:10px 10px; border-bottom:1px solid rgba(255,255,255,.06);
-    font-size:13px; vertical-align:top;
+  #__onth_snap_filter__ { flex: 1; }
+  #__onth_snap_stop__ { width: 86px; text-align: center; }
+  #__onth_snap_refresh__ {
+    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    border: 0;
+    color: #fff;
+    border-radius: 10px;
+    padding: 9px 14px;
+    font-weight: 900;
+    font-size: 13px;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(37,99,235,.3);
+    transition: all 220ms cubic-bezier(0.4, 0, 0.2, 1);
   }
-  #__onth_snap_table__ tbody tr:hover{ background: rgba(255,255,255,.04); }
-  .__onth_mono{ font-variant-numeric: tabular-nums; }
-  .__onth_row{ cursor:pointer; }
-  .__onth_name{ font-weight:900; }
-  .__onth_detail{
-    background: rgba(15,23,42,.35);
-    border-bottom:1px solid rgba(255,255,255,.06);
+  #__onth_snap_refresh__:hover {
+    background: linear-gradient(135deg, #60a5fa, #3b82f6);
+    box-shadow: 0 4px 12px rgba(37,99,235,.4);
+    transform: translateY(-1px);
   }
-  .__onth_detailBox{ padding:10px 10px 12px; display:grid; gap:8px; }
-  .__onth_kv{ display:grid; grid-template-columns:86px 1fr; gap:6px 10px; }
-  .__onth_k{ color:rgba(148,163,184,.95); font-size:12px; }
-  .__onth_v{ color:#e5e7eb; font-size:13px; word-break:break-word; }
-  .__onth_pills{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-  .__onth_pillNoBg{ border:0 !important; background: transparent !important; padding:0 !important; box-shadow:none !important; }
-  .__onth_btn{
-    border:1px solid rgba(255,255,255,.16);
-    background: transparent;
-    color:#e5e7eb;
-    padding:8px 10px;
-    border-radius:10px;
-    font-weight:900;
-    cursor:pointer;
+  #__onth_snap_refresh__:active {
+    transform: translateY(0);
+    transition: all 100ms cubic-bezier(0.4, 0, 0.2, 1);
   }
-  .__onth_btn:hover{ background: rgba(255,255,255,.06); }
-  .__onth_btn:active{ transform: translateY(1px); }
-  .__onth_btnPrimary{ border-color: rgba(59,130,246,.45); }
-  .__onth_btnPrimary:hover{ background: rgba(37,99,235,.16); }
-  .__onth_btnSmall{ padding:6px 8px; border-radius:9px; font-size:12px; font-weight:900; }
+  #__onth_snap_close__ {
+    margin-left: 6px;
+    background: rgba(30,41,59,.6);
+    border: 1px solid rgba(148,163,184,.25);
+    color: #e5e7eb;
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-weight: 900;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  #__onth_snap_close__:hover {
+    background: rgba(51,65,85,.75);
+    border-color: rgba(148,163,184,.35);
+    transform: translateY(-1px);
+  }
+  #__onth_snap_close__:active {
+    transform: translateY(0);
+    transition: all 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  #__onth_snap_tablewrap__ { flex: 1; overflow: auto; }
+  #__onth_snap_table__ { width: 100%; border-collapse: collapse; }
+  #__onth_snap_table__ thead th {
+    position: sticky; top: 0;
+    background: linear-gradient(180deg, rgba(15,23,42,.98), rgba(15,23,42,.95));
+    padding: 12px 12px;
+    font-size: 12px;
+    color: rgba(148,163,184,1);
+    text-align: left;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(59,130,246,.2);
+    user-select: none;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    transition: color 200ms ease;
+  }
+  #__onth_snap_table__ thead th:hover {
+    color: rgba(59,130,246,.95);
+  }
+  #__onth_snap_table__ tbody td {
+    padding: 11px 12px;
+    border-bottom: 1px solid rgba(255,255,255,.05);
+    font-size: 13px;
+    vertical-align: top;
+  }
+  #__onth_snap_table__ tbody tr {
+    transition: background-color 200ms ease;
+  }
+  #__onth_snap_table__ tbody tr:hover {
+    background: rgba(59,130,246,.08);
+  }
+  .__onth_mono { font-variant-numeric: tabular-nums; }
+  .__onth_row { cursor: pointer; }
+  .__onth_name {
+    font-weight: 900;
+    color: #f1f5f9;
+  }
+  .__onth_detail {
+    background: linear-gradient(180deg, rgba(30,41,59,.45), rgba(15,23,42,.35));
+    border-bottom: 1px solid rgba(59,130,246,.15);
+  }
+  .__onth_detailBox { padding: 14px 14px 16px; display: grid; gap: 10px; }
+  .__onth_kv { display: grid; grid-template-columns: 86px 1fr; gap: 8px 12px; }
+  .__onth_k {
+    color: rgba(148,163,184,1);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  .__onth_v {
+    color: #e5e7eb;
+    font-size: 13px;
+    word-break: break-word;
+  }
+  .__onth_pills { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .__onth_pillNoBg { border: 0 !important; background: transparent !important; padding: 0 !important; box-shadow: none !important; }
+  .__onth_btn {
+    border: 1px solid rgba(148,163,184,.3);
+    background: rgba(30,41,59,.5);
+    color: #e5e7eb;
+    padding: 9px 12px;
+    border-radius: 10px;
+    font-weight: 900;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .__onth_btn:hover {
+    background: rgba(51,65,85,.65);
+    border-color: rgba(148,163,184,.45);
+    transform: translateY(-1px);
+  }
+  .__onth_btn:active {
+    transform: translateY(0);
+    transition: all 100ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .__onth_btnPrimary {
+    border-color: rgba(59,130,246,.5);
+    background: linear-gradient(135deg, rgba(59,130,246,.85), rgba(37,99,235,.75));
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(37,99,235,.25);
+  }
+  .__onth_btnPrimary:hover {
+    background: linear-gradient(135deg, rgba(96,165,250,.9), rgba(59,130,246,.85));
+    border-color: rgba(59,130,246,.65);
+    box-shadow: 0 4px 12px rgba(37,99,235,.35);
+  }
+  .__onth_btnSmall {
+    padding: 7px 10px;
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 900;
+  }
   `;
 
   function openDrawer() {
@@ -1417,7 +1563,7 @@
    */
   function rebuildView() {
     perf.start('rebuildView');
-    
+
     const f = norm(UI.filter);
     let v = UI.data.slice();
     if (f)
@@ -1446,22 +1592,22 @@
     UI.view = v;
     const countEl = document.getElementById("__onth_snap_count__");
     if (countEl) countEl.textContent = `${v.length} drivers`;
-    
+
     perf.end('rebuildView');
   }
-  
+
   /**
    * Batch DOM updates for table rendering
    */
   function renderTable() {
     perf.start('renderTable');
-    
+
     const tbody = document.querySelector("#__onth_snap_table__ tbody");
     if (!tbody) {
       perf.end('renderTable');
       return;
     }
-    
+
     // Use DocumentFragment for batch DOM updates
     const fragment = document.createDocumentFragment();
 
@@ -1561,11 +1707,11 @@
         fragment.appendChild(dtr);
       }
     }
-    
+
     // Single DOM update
     tbody.innerHTML = "";
     tbody.appendChild(fragment);
-    
+
     perf.end('renderTable');
   }
 
@@ -1649,21 +1795,21 @@
     listeners: [],
     intervals: [],
     observers: [],
-    
+
     addListener(element, event, handler, options) {
       if (!element) return;
       element.addEventListener(event, handler, options);
       this.listeners.push({ element, event, handler, options });
     },
-    
+
     addInterval(id) {
       this.intervals.push(id);
     },
-    
+
     addObserver(observer) {
       this.observers.push(observer);
     },
-    
+
     removeAll() {
       // Remove event listeners
       for (const { element, event, handler, options } of this.listeners) {
@@ -1674,13 +1820,13 @@
         }
       }
       this.listeners = [];
-      
+
       // Clear intervals
       for (const id of this.intervals) {
         clearInterval(id);
       }
       this.intervals = [];
-      
+
       // Disconnect observers
       for (const observer of this.observers) {
         try {
@@ -1690,11 +1836,11 @@
         }
       }
       this.observers = [];
-      
+
       log.info("Cleanup completed");
     }
   };
-  
+
   // Global cleanup on page unload
   if (typeof window !== 'undefined') {
     window.addEventListener('beforeunload', () => cleanup.removeAll());
@@ -1714,14 +1860,14 @@
     btn.id = "__onth_snap_btn__";
     btn.textContent = "Driver Snapshot";
     btn.setAttribute("aria-label", "Open Driver Snapshot");
-    
+
     const handleBtnClick = async () => {
       if (!UI.open) {
         openDrawer();
         if (!UI.data.length) await refreshSnapshot();
       } else closeDrawer();
     };
-    
+
     cleanup.addListener(btn, "click", handleBtnClick);
     document.body.appendChild(btn);
 
@@ -1819,7 +1965,7 @@
 
     // Event handlers with debouncing
     cleanup.addListener(closeBtn, "click", closeDrawer);
-    
+
     const debouncedRefresh = debounce(refreshSnapshot, CONFIG.DEBOUNCE_DELAY);
     cleanup.addListener(refreshBtn, "click", debouncedRefresh);
 
@@ -1899,7 +2045,7 @@
       const row = UI.data.find((r) => r.key === key);
       if (row) await requestAddress(row);
     };
-    
+
     cleanup.addListener(drawer, "click", handleDrawerClick);
   }
 
@@ -1927,7 +2073,7 @@
       log.warn("Max init attempts reached");
     }
   }, 250);
-  
+
   cleanup.addInterval(initInterval);
 
   const observer = new MutationObserver(() => {
