@@ -1048,7 +1048,7 @@
     const itineraryId = pathMatch?.[1] || null;
     
     // Extract serviceAreaId from query params
-    const serviceAreaId = u.searchParams. get("serviceAreaId");
+    const serviceAreaId = u.searchParams.get("serviceAreaId");
     
     return {
       itineraryId,
