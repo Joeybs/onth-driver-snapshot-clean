@@ -19,17 +19,13 @@
  * - Batch DOM updates using DocumentFragment
  * - LRU cache for address data
  * - Performance monitoring with debug mode
- * - Prioritized address field patterns for faster JSON traversal
  * - Single-pass address cleaning (no redundant processing)
- * - Improved address index caching with validation
- * - Performance metrics for JSON vs DOM retrieval methods
  * 
  * Reliability improvements:
  * - Comprehensive error handling with try-catch blocks
  * - Input validation and sanitization
  * - Fetch timeout and retry mechanisms
  * - Memory leak prevention with cleanup system
- * - JSON validation before processing
  * 
  * Security enhancements:
  * - XSS prevention through text sanitization
@@ -440,95 +436,7 @@
     return false;
   };
 
-  /* ---------------------------
-     Capture itinerary JSON by itineraryId
-  ---------------------------- */
-  (function hookNetworkOnce() {
-    if (window.__ONTH_NET__?.hooked) return;
 
-    // Atomic check-and-set
-    if (!window.__ONTH_NET__) {
-      window.__ONTH_NET__ = { hooked: false, byId: Object.create(null) };
-    }
-    if (window.__ONTH_NET__.hooked) return;
-    window.__ONTH_NET__.hooked = true;
-
-    window.__ONTH_ADDRINDEX__ = window.__ONTH_ADDRINDEX__ || Object.create(null);
-
-    const RX_ITIN = /\/operations\/execution\/api\/itineraries\/([^/?]+)/i;
-    const isItinUrl = (url) => RX_ITIN.test(String(url ?? ""));
-
-    /**
-     * Validate and save itinerary JSON
-     * @param {string} url - Request URL
-     * @param {object} j - JSON response
-     */
-    const saveIfItinerary = (url, j) => {
-      try {
-        if (!j || typeof j !== 'object') {
-          log.warn("Invalid itinerary JSON (not an object)");
-          return;
-        }
-        
-        const m = String(url ?? "").match(RX_ITIN);
-        const itinId = m?.[1];
-        if (!itinId) {
-          log.warn("No itinerary ID in URL");
-          return;
-        }
-        
-        window.__ONTH_NET__.byId[String(itinId)] = j;
-        if (window.__ONTH_ADDRINDEX__) {
-          delete window.__ONTH_ADDRINDEX__[String(itinId)];
-        }
-        log.info("Captured itinerary:", itinId);
-      } catch (err) {
-        log.error("Failed to save itinerary:", err);
-      }
-    };
-
-    const origFetch = window.fetch;
-    window.fetch = async (...args) => {
-      const res = await origFetch(...args);
-      try {
-        const url = String(args?.[0]?.url ?? args?.[0] ?? "");
-        if (isItinUrl(url)) {
-          res
-            .clone()
-            .json()
-            .then((j) => saveIfItinerary(url, j))
-            .catch((err) => log.warn("Failed to parse fetch response:", err));
-        }
-      } catch (err) {
-        log.error("Fetch hook error:", err);
-      }
-      return res;
-    };
-
-    const origOpen = XMLHttpRequest.prototype.open;
-    const origSend = XMLHttpRequest.prototype.send;
-
-    XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-      this.__ONTH_url__ = String(url ?? "");
-      return origOpen.call(this, method, url, ...rest);
-    };
-
-    XMLHttpRequest.prototype.send = function (...args) {
-      this.addEventListener("load", function () {
-        try {
-          const url = this.__ONTH_url__ || "";
-          if (!isItinUrl(url)) return;
-          const txt = this.responseText;
-          if (!txt || txt[0] !== "{") return;
-          const parsed = JSON.parse(txt);
-          saveIfItinerary(url, parsed);
-        } catch (err) {
-          log.warn("XHR hook error:", err);
-        }
-      });
-      return origSend.apply(this, args);
-    };
-  })();
 
   /* ---------------------------
      Driver rows
@@ -1035,343 +943,9 @@
     return finalState;
   }
 
-  /**
-   * Get itinerary parameters from current URL
-   * @returns {object} Itinerary parameters
-   */
-  function getItinParamsFromUrl() {
-  try {
-    const u = new URL(location.href);
-    
-    // Extract itineraryId from URL path:  /itineraries/{id}/ or /itineraries/{id}
-    const pathMatch = u.pathname.match(/\/itineraries\/([^/]+)/);
-    const itineraryId = pathMatch?.[1] || null;
-    
-    // Extract serviceAreaId from query params
-    const serviceAreaId = u.searchParams.get("serviceAreaId");
-    
-    return {
-      itineraryId,
-      serviceAreaId,
-    };
-  } catch (err) {
-    log.warn("URL params parsing failed:", err);
-    return { itineraryId: null, serviceAreaId: null };
-  }
-}
 
-  /**
-   * Fetch itinerary JSON from API with timeout and caching
-   * @returns {Promise<object|null>} Itinerary JSON
-   */
-  async function getItineraryJSON() {
-    perf.start('getItineraryJSON');
-    
-    const { itineraryId, serviceAreaId } = getItinParamsFromUrl();
-    if (!itineraryId || !serviceAreaId) {
-      log.warn("Missing itinerary params");
-      return null;
-    }
 
-    const cached = window.__ONTH_NET__?.byId?.[String(itineraryId)];
-    if (cached && typeof cached === 'object') {
-      log.info("Using cached itinerary JSON");
-      perf.end('getItineraryJSON');
-      return cached;
-    }
 
-    const apiUrl =
-      `/operations/execution/api/itineraries/${encodeURIComponent(itineraryId)}` +
-      `?documentType=Itinerary&historicalDay=false&itineraryId=${encodeURIComponent(
-        itineraryId
-      )}` +
-      `&serviceAreaId=${encodeURIComponent(serviceAreaId)}`;
-
-    try {
-      const response = await fetchWithTimeout(apiUrl, { credentials: "include" });
-      
-      if (!response.ok) {
-        log.error(`Fetch itinerary failed with status: ${response.status}`);
-        return null;
-      }
-      
-      const j = await response.json();
-      
-      if (!j || typeof j !== 'object') {
-        log.error("Invalid itinerary JSON response");
-        return null;
-      }
-      
-      if (j) {
-        window.__ONTH_NET__ = window.__ONTH_NET__ || {};
-        window.__ONTH_NET__.byId = window.__ONTH_NET__.byId || Object.create(null);
-        window.__ONTH_NET__.byId[String(itineraryId)] = j;
-        window.__ONTH_ADDRINDEX__ = window.__ONTH_ADDRINDEX__ || Object.create(null);
-        delete window.__ONTH_ADDRINDEX__[String(itineraryId)];
-        log.info("Fetched itinerary JSON");
-      }
-      
-      perf.end('getItineraryJSON');
-      return j;
-    } catch (err) {
-      log.error("Get itinerary JSON error:", err);
-      perf.end('getItineraryJSON');
-      return null;
-    }
-  }
-
-  /* ---------------------------
-     JSON address index
-  ---------------------------- */
-  /**
-   * Build index of stop addresses from itinerary JSON
-   * Optimized with prioritized patterns and early termination
-   * @param {object} itinJson - Itinerary JSON object
-   * @returns {object} Index of stop numbers to addresses (raw, not cleaned)
-   */
-  function buildStopAddressIndex(itinJson) {
-    perf.start('buildStopAddressIndex');
-    
-    const idx = Object.create(null);
-    let foundCount = 0;
-    
-    if (!itinJson || typeof itinJson !== 'object') {
-      log.warn("Invalid itinerary JSON for address index");
-      perf.end('buildStopAddressIndex');
-      return idx;
-    }
-
-    const asNum = (v) => {
-      if (typeof v === "number" && Number.isFinite(v)) return v;
-      if (typeof v === "string" && v.trim() && !Number.isNaN(Number(v)))
-        return Number(v);
-      return null;
-    };
-
-    const pickStopNum = (o) => {
-      if (!o || typeof o !== "object") return null;
-      const keys = [
-        "stopNumber",
-        "stopNum",
-        "stopSequenceNumber",
-        "stopSequence",
-        "sequenceNumber",
-        "sequence",
-        "stopIndex",
-        "index",
-        "order",
-        "stopIdNumber",
-      ];
-      for (const k of keys) {
-        if (k in o) {
-          const n = asNum(o[k]);
-          if (n != null) return n;
-        }
-      }
-      const nested = o.stop ?? o.stopInfo ?? o.stopDetails;
-      if (nested && typeof nested === "object") {
-        for (const k of keys) {
-          if (k in nested) {
-            const n = asNum(nested[k]);
-            if (n != null) return n;
-          }
-        }
-      }
-      return null;
-    };
-
-    // Store raw address parts without cleaning (optimization: clean only once on retrieval)
-    const joinParts = (parts) =>
-      parts
-        .filter(Boolean)
-        .map((x) => String(x ?? "").trim())
-        .filter(Boolean)
-        .join("\n");
-
-    const extractAddressFromObj = (o) => {
-      if (!o || typeof o !== "object") return null;
-
-      // Prioritize common address patterns for faster lookup
-      const candidates = [
-        o.address,
-        o.deliveryAddress,
-        o.shipToAddress,
-        o.destinationAddress,
-        o.location?.address,
-        o.location?.destinationAddress,
-        o.stopAddress,
-        o.addressInfo,
-        o.customerAddress,
-      ];
-
-      for (const c of candidates) {
-        if (typeof c === "string" && c.trim()) return c;  // Return raw, don't clean yet
-      }
-
-      const addrObj =
-        candidates.find((c) => c && typeof c === "object") ??
-        o.destination?.address ??
-        o.customer?.address ??
-        o.locationAddress;
-
-      if (addrObj && typeof addrObj === "object") {
-        const line1 =
-          addrObj.addressLine1 ??
-          addrObj.line1 ??
-          addrObj.street ??
-          addrObj.street1 ??
-          addrObj.address1 ??
-          addrObj.addressLine ??
-          (Array.isArray(addrObj.addressLines) ? addrObj.addressLines[0] : null) ??
-          (Array.isArray(addrObj.lines) ? addrObj.lines[0] : null);
-
-        const line2 =
-          addrObj.addressLine2 ??
-          addrObj.line2 ??
-          addrObj.unit ??
-          addrObj.apt ??
-          addrObj.suite ??
-          (Array.isArray(addrObj.addressLines) ? addrObj.addressLines[1] : null) ??
-          (Array.isArray(addrObj.lines) ? addrObj.lines[1] : null);
-
-        const city = addrObj.city ?? addrObj.town ?? addrObj.locality;
-        const state =
-          addrObj.state ?? addrObj.region ?? addrObj.stateCode ?? addrObj.province;
-        const zip =
-          addrObj.zip ?? addrObj.zipCode ?? addrObj.postalCode ?? addrObj.postcode;
-
-        const combo = joinParts([
-          line1,
-          line2,
-          [city, state, zip]
-            .filter(Boolean)
-            .join(", ")
-            .replace(/\s+,/g, ",")
-            .trim(),
-        ]);
-        if (combo) return combo;  // Return raw, don't clean yet
-      }
-
-      const maybeTextKeys = [
-        "formattedAddress",
-        "addressText",
-        "fullAddress",
-        "addressString",
-      ];
-      for (const k of maybeTextKeys)
-        if (typeof o[k] === "string" && o[k].trim()) return o[k];  // Return raw
-
-      return null;
-    };
-
-    try {
-      const seen = new WeakSet();
-      const maxDepth = 20; // Prevent infinite recursion
-      
-      // Priority 1: Check common stop array patterns first
-      const commonStopPaths = [
-        itinJson.stops,
-        itinJson.itinerary?.stops,
-        itinJson.route?.stops,
-        itinJson.deliveries,
-        itinJson.stopList,
-      ];
-      
-      for (const stopArray of commonStopPaths) {
-        if (Array.isArray(stopArray) && stopArray.length > 0) {
-          log.debug("Found stop array with", stopArray.length, "stops");
-          for (const stop of stopArray) {
-            if (!stop || typeof stop !== "object") continue;
-            const stopNum = pickStopNum(stop);
-            if (stopNum != null && !idx[String(stopNum)]) {
-              const addr = extractAddressFromObj(stop);
-              if (addr) {
-                idx[String(stopNum)] = addr;
-                foundCount++;
-              }
-            }
-          }
-          // If we found stops in a common path, we might be done
-          if (foundCount > 0) {
-            log.debug("Found", foundCount, "addresses in prioritized path");
-          }
-        }
-      }
-      
-      // Priority 2: Deep walk only if needed (fallback for uncommon structures)
-      (function walk(node, depth = 0) {
-        if (!node || typeof node !== "object" || depth > maxDepth) return;
-        if (seen.has(node)) return;
-        seen.add(node);
-
-        try {
-          const stopNum = pickStopNum(node);
-          if (stopNum != null && !idx[String(stopNum)]) {
-            const addr = extractAddressFromObj(node);
-            if (addr) {
-              idx[String(stopNum)] = addr;
-              foundCount++;
-            }
-          }
-
-          if (Array.isArray(node)) {
-            for (const item of node) {
-              walk(item, depth + 1);
-            }
-          } else {
-            for (const k of Object.keys(node)) {
-              const v = node[k];
-              if (v && typeof v === "object") walk(v, depth + 1);
-            }
-          }
-        } catch (err) {
-          log.warn("Error walking node:", err);
-        }
-      })(itinJson);
-    } catch (err) {
-      log.error("buildStopAddressIndex error:", err);
-    }
-
-    perf.end('buildStopAddressIndex');
-    log.info("Built address index with", Object.keys(idx).length, "stops");
-    return idx;
-  }
-
-  /**
-   * Get address for a specific stop from JSON
-   * Optimized with proper cache validation and single cleaning pass
-   * @param {number} stopNum - Stop number
-   * @param {object} itinJson - Itinerary JSON
-   * @returns {string|null} Address or null
-   */
-  function getJsonAddressForStop(stopNum, itinJson) {
-    perf.start('getJsonAddressForStop');
-    
-    const { itineraryId } = getItinParamsFromUrl();
-    const id = itineraryId ? String(itineraryId) : null;
-    if (!id || !itinJson) {
-      perf.end('getJsonAddressForStop');
-      return null;
-    }
-
-    window.__ONTH_ADDRINDEX__ = window.__ONTH_ADDRINDEX__ || Object.create(null);
-    let idx = window.__ONTH_ADDRINDEX__[id];
-    
-    // Validate cache: rebuild only if missing or invalid
-    if (!idx || typeof idx !== 'object' || Object.keys(idx).length === 0) {
-      log.debug("Cache miss - building address index");
-      idx = buildStopAddressIndex(itinJson);
-      window.__ONTH_ADDRINDEX__[id] = idx;
-    } else {
-      log.debug("Cache hit - using existing address index");
-    }
-    
-    const rawAddr = idx[String(stopNum)];
-    const result = rawAddr ? cleanAddress(rawAddr) : null;  // Clean only once, at final retrieval
-    
-    perf.end('getJsonAddressForStop');
-    return result;
-  }
 
   /* ---------------------------
      Stop DOM helpers
@@ -1588,7 +1162,7 @@
     return { remaining, target: remaining[want - 1] || null };
   }
 
-  async function copyNthRemainingStopAddress(nthRemaining = 5, itinJson = null) {
+  async function copyNthRemainingStopAddress(nthRemaining = 5) {
     perf.start('copyNthRemainingStopAddress');
     
     const want = Math.max(1, Number(nthRemaining) || 5);
@@ -1601,25 +1175,8 @@
 
     log.info("Target stop:", target.stopNum);
 
-    // Try JSON first with performance tracking
-    perf.start('jsonAddressRetrieval');
-    const jsonAddr = getJsonAddressForStop(target.stopNum, itinJson);
-    perf.end('jsonAddressRetrieval');
-    
-    if (jsonAddr) {
-      const full = jsonAddr;  // Already cleaned in getJsonAddressForStop
-      await window.ONTH_copyText(full);
-      log.info("Copied from JSON:", full);
-      log.debug("Performance: JSON retrieval used");
-      perf.end('copyNthRemainingStopAddress');
-      return { stopNum: target.stopNum, full, raw: target, source: "json" };
-    }
-
-    // Fallback to DOM with performance tracking
-    log.debug("JSON address not found, falling back to DOM");
-    perf.start('domAddressRetrieval');
+    // Use DOM-based address retrieval
     const domAddr = await domExpandAndGetAddressForStop(target.stopNum);
-    perf.end('domAddressRetrieval');
     
     if (!domAddr) {
       log.warn("No DOM address found");
@@ -1636,7 +1193,6 @@
 
     await window.ONTH_copyText(full);
     log.info("Copied from DOM:", full);
-    log.debug("Performance: DOM retrieval used (slower fallback)");
     perf.end('copyNthRemainingStopAddress');
     return { stopNum: target.stopNum, full, raw: target, source: "dom" };
   }
@@ -1721,11 +1277,7 @@
     await setHideCompleted(true);
     await sleep(350);
 
-    const itinJson = await getItineraryJSON().catch((err) => {
-      log.error("Failed to get itinerary JSON:", err);
-      return null;
-    });
-    const res = await copyNthRemainingStopAddress(Number(stopN) || 5, itinJson);
+    const res = await copyNthRemainingStopAddress(Number(stopN) || 5);
 
     await goBackToList();
     await sleep(300);
