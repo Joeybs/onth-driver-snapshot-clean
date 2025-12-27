@@ -1130,7 +1130,7 @@
     return cleanAddress(node.innerText) || null;
   }
 
-  async function collectRemainingStopsNth(nthRemaining = 5) {
+  async function collectRemainingStopsNth(nthRemaining = 3) {
     const scroller = pickStopScroller();
     const want = Math.max(1, Number(nthRemaining) || 5);
 
