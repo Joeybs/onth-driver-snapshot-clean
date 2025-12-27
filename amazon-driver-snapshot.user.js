@@ -63,7 +63,7 @@
     MAX_CACHE_SIZE: 500,
     DEFAULT_STOP_N: 5,
     MAX_SCROLL_LOOPS: 160,
-    STAGNANT_THRESHOLD: 7,
+    STAGNANT_THRESHOLD: 3,  // Optimized: reduced from 7 to 3 for faster stagnant detection
     BASE_SLEEP: 120,
     RETRY_ATTEMPTS: 3,
     DEBOUNCE_DELAY: 300,
@@ -224,23 +224,40 @@
       const response = await fetch(url, { ...options, signal: controller.signal });
       clearTimeout(timeoutId);
       
-      if (!response.ok && retries > 0) {
-        log.warn(`Fetch failed (${response.status}), retrying...`);
-        await sleep(500);
-        return fetchWithTimeout(url, options, timeout, retries - 1);
+      // Only retry on actual failures, not on success
+      if (!response.ok) {
+        if (retries > 0) {
+          log.warn(`Fetch failed (${response.status}), retrying...`);
+          await sleep(500);
+          return fetchWithTimeout(url, options, timeout, retries - 1);
+        }
+        // No retries left, throw error for failed response
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
+      // Return immediately on success - no unnecessary retries
       return response;
     } catch (error) {
       clearTimeout(timeoutId);
       
-      if (error.name === 'AbortError') {
+      // Don't retry if this is already a thrown HTTP error
+      if (error.message?.startsWith('HTTP ')) {
+        throw error;
+      }
+      
+      // Only retry on network errors or timeouts
+      if (error.name === 'AbortError' && retries > 0) {
         log.error('Fetch timeout:', url);
-        if (retries > 0) {
-          log.warn('Retrying after timeout...');
-          await sleep(500);
-          return fetchWithTimeout(url, options, timeout, retries - 1);
-        }
+        log.warn('Retrying after timeout...');
+        await sleep(500);
+        return fetchWithTimeout(url, options, timeout, retries - 1);
+      }
+      
+      // Retry on other network errors if retries available
+      if (retries > 0) {
+        log.warn('Network error, retrying...', error);
+        await sleep(500);
+        return fetchWithTimeout(url, options, timeout, retries - 1);
       }
       
       throw error;
@@ -609,7 +626,8 @@
       log.warn("Failed to scroll to top:", err);
       panel.scrollTop = 0;
     }
-    await sleep(CONFIG.BASE_SLEEP * 4);
+    // Optimized: reduced initial wait from 480ms to 200ms
+    await sleep(200);
 
     const out = [];
     let lastCount = 0;
@@ -641,7 +659,8 @@
         log.warn("Smooth scroll failed, using fallback:", err);
         panel.scrollTop += scrollAmount;
       }
-      await sleep(360);
+      // Optimized: reduced inter-scroll delay from 360ms to 100ms
+      await sleep(100);
     }
 
     perf.end('collectAllDrivers');
@@ -1596,18 +1615,21 @@
 
   async function requestAddress(row) {
     if (!row?.name) return;
-    if (globalMutex.isLocked) {
-      toast("Busy…", null);
-      return;
-    }
-
+    
     const stopN = Math.max(1, Number(UI.stopN) || CONFIG.DEFAULT_STOP_N);
     const cacheKey = `${row.key}|${stopN}`;
 
+    // Optimized: Early cache check before acquiring mutex
     if (UI.addrByKey.has(cacheKey)) {
       UI.openKey = row.key;
       renderTable();
       toast(`Using cached stop ${stopN}`, true);
+      log.debug("Cache hit, skipping expensive operations");
+      return;
+    }
+    
+    if (globalMutex.isLocked) {
+      toast("Busy…", null);
       return;
     }
 
