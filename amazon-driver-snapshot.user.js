@@ -70,6 +70,7 @@
 
   const CONFIG = {
     MAX_CACHE_SIZE: 500,
+    CACHE_CLEAR_THRESHOLD: 0.7,
     DEFAULT_STOP_N: 3,
     MAX_SCROLL_LOOPS: 160,
     STAGNANT_THRESHOLD: 3,
@@ -1590,7 +1591,7 @@
     UI.pendingKey = null;
     
     // Clear cache if it's getting large
-    if (UI.addrByKey.size > CONFIG.MAX_CACHE_SIZE * 0.7) {
+    if (UI.addrByKey.size > CONFIG.MAX_CACHE_SIZE * CONFIG.CACHE_CLEAR_THRESHOLD) {
       log.debug("Clearing address cache on drawer close");
       UI.addrByKey.clear();
     }
@@ -2020,7 +2021,7 @@
       rebuildView();
       renderTable();
     }, CONFIG.DEBOUNCE_DELAY);
-    cleanup.addListener(filterInput, "input", debouncedFilter, { passive: true });
+    cleanup.addListener(filterInput, "input", debouncedFilter);
 
     const handleStopInput = (e) => {
       const validated = validateStopNumber(e.target?.value);
@@ -2028,7 +2029,7 @@
       e.target.value = String(validated);
       toast(`Stop set to ${UI.stopN}`, null);
     };
-    cleanup.addListener(stopInput, "input", debounce(handleStopInput, CONFIG.DEBOUNCE_DELAY), { passive: true });
+    cleanup.addListener(stopInput, "input", debounce(handleStopInput, CONFIG.DEBOUNCE_DELAY));
 
     thead.querySelectorAll("th").forEach((th) => {
       const handleSort = () => {
