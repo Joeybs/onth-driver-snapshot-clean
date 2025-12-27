@@ -1043,9 +1043,9 @@
   try {
     const u = new URL(location.href);
     
-    // Extract itineraryId from URL path:  /itineraries/{id}/
-    const pathMatch = u.pathname.match(/\/itineraries\/([^/]+)\//);
-    const itineraryId = pathMatch? .[1] || null;
+    // Extract itineraryId from URL path:  /itineraries/{id}/ or /itineraries/{id}
+    const pathMatch = u.pathname.match(/\/itineraries\/([^/]+)/);
+    const itineraryId = pathMatch?.[1] || null;
     
     // Extract serviceAreaId from query params
     const serviceAreaId = u.searchParams. get("serviceAreaId");
