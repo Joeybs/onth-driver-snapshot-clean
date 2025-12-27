@@ -1,4 +1,3 @@
-
 // ==UserScript==
 // @name         Amazon Driver Snapshot
 // @namespace    https://github.com/onth/scripts
