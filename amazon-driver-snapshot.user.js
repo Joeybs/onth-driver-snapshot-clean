@@ -1,3 +1,4 @@
+
 // ==UserScript==
 // @name         Amazon Driver Snapshot
 // @namespace    https://github.com/onth/scripts
@@ -63,8 +64,13 @@
     MAX_CACHE_SIZE: 500,
     DEFAULT_STOP_N: 5,
     MAX_SCROLL_LOOPS: 160,
-    STAGNANT_THRESHOLD: 7,
-    BASE_SLEEP: 120,
+    STAGNANT_THRESHOLD: 3,
+    BASE_SLEEP: 50,
+    SCROLL_DELAY: 120,
+    ROW_PROCESS_DELAY: 0,
+    INITIAL_WAIT_DELAY: 200,
+    MIN_SCROLL_AMOUNT: 260,
+    SCROLL_MULTIPLIER: 1.2,
     RETRY_ATTEMPTS: 3,
     DEBOUNCE_DELAY: 300,
     FETCH_TIMEOUT: 15000,
@@ -623,7 +629,7 @@
       log.warn("Failed to scroll to top:", err);
       panel.scrollTop = 0;
     }
-    await sleep(CONFIG.BASE_SLEEP * 4);
+    await sleep(CONFIG.INITIAL_WAIT_DELAY);
 
     const out = [];
     let lastCount = 0;
@@ -635,7 +641,9 @@
         if (trackedElements.has(row)) continue;
         trackedElements.set(row, true);
         out.push(parseRow(row));
-        await sleep(18);
+        if (CONFIG.ROW_PROCESS_DELAY > 0) {
+          await sleep(CONFIG.ROW_PROCESS_DELAY);
+        }
       }
 
       const atBottom =
@@ -648,14 +656,14 @@
         break;
       }
 
-      const scrollAmount = Math.max(260, panel.clientHeight * 0.9);
+      const scrollAmount = Math.max(CONFIG.MIN_SCROLL_AMOUNT, panel.clientHeight * CONFIG.SCROLL_MULTIPLIER);
       try {
         await smoothScrollTo(panel, panel.scrollTop + scrollAmount);
       } catch (err) {
         log.warn("Smooth scroll failed, using fallback:", err);
         panel.scrollTop += scrollAmount;
       }
-      await sleep(360);
+      await sleep(CONFIG.SCROLL_DELAY);
     }
 
     perf.end('collectAllDrivers');
