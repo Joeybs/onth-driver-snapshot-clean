@@ -1040,17 +1040,22 @@
    * @returns {object} Itinerary parameters
    */
   function getItinParamsFromUrl() {
-    try {
-      const u = new URL(location.href);
-      return {
-        itineraryId: u.searchParams.get("itineraryId"),
-        serviceAreaId: u.searchParams.get("serviceAreaId"),
-      };
-    } catch (err) {
-      log.warn("URL params parsing failed:", err);
-      return { itineraryId: null, serviceAreaId: null };
-    }
+  try {
+    const u = new URL(location. href);
+    
+    // Extract itineraryId from path:  /itineraries/{id}/documentType/... 
+    const pathMatch = location.pathname.match(/\/itineraries\/([^/? ]+)/);
+    const itineraryId = pathMatch ? pathMatch[1] : u.searchParams.get("itineraryId");
+    
+    return {
+      itineraryId: itineraryId,
+      serviceAreaId: u.searchParams.get("serviceAreaId"),
+    };
+  } catch (err) {
+    log.warn("URL params parsing failed:", err);
+    return { itineraryId: null, serviceAreaId: null };
   }
+}
 
   /**
    * Fetch itinerary JSON from API with timeout and caching
@@ -1059,7 +1064,7 @@
   async function getItineraryJSON() {
     perf.start('getItineraryJSON');
     
-    const { itineraryId, serviceAreaId } = getItinParamsFromUrl();
+    const { itineraryId, serviceAreaId } = await getItinParamsFromUrl();
     if (!itineraryId || !serviceAreaId) {
       log.warn("Missing itinerary params");
       return null;
