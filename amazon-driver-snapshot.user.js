@@ -1035,20 +1035,20 @@
     return finalState;
   }
 
-  /**
-   * Get itinerary parameters from current URL
-   * @returns {object} Itinerary parameters
-   */
-  function getItinParamsFromUrl() {
+
+ * Get itinerary parameters from current URL
+ * @returns {object} Itinerary parameters
+ */
+function getItinParamsFromUrl() {
   try {
-    const u = new URL(location. href);
+    const u = new URL(location.href);
     
-    // Extract itineraryId from path:  /itineraries/{id}/documentType/... 
+    // Extract itineraryId from path:  /itineraries/{id}/documentType/...  
     const pathMatch = location.pathname.match(/\/itineraries\/([^/? ]+)/);
     const itineraryId = pathMatch ? pathMatch[1] : u.searchParams.get("itineraryId");
     
     return {
-      itineraryId: itineraryId,
+      itineraryId:  itineraryId,
       serviceAreaId: u.searchParams.get("serviceAreaId"),
     };
   } catch (err) {
@@ -1064,7 +1064,7 @@
   async function getItineraryJSON() {
     perf.start('getItineraryJSON');
     
-    const { itineraryId, serviceAreaId } = await getItinParamsFromUrl();
+    const { itineraryId, serviceAreaId } = getItinParamsFromUrl();
     if (!itineraryId || !serviceAreaId) {
       log.warn("Missing itinerary params");
       return null;
