@@ -1217,7 +1217,7 @@ await goBackToList();
 
 perf.end('copyNthRemainingStopAddress');
 return { stopNum: target.stopNum, full, raw: target, source: "dom" };
-
+}
   async function goBackToList() {
     if (document.querySelector(ROW_SEL)) {
       log.info("Already on list view");
