@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Amazon Driver Snapshot
 // @namespace    https://github.com/onth/scripts
-// @version      2.2.0
-// @description  In-page Driver Snapshot drawer. Click driver → open itinerary → hide completed → copy Nth *remaining* stop address (default 5) → auto-back. Optimized for performance, reliability, and security.
+// @version      2.2.3
+// @description  In-page Driver Snapshot drawer. Click driver → open itinerary → hide completed → copy Nth *remaining* stop address (default 3) → auto-back. Optimized for performance, reliability, and accessibility.
 // @match        https://logistics.amazon.com/operations/execution/itineraries*
 // @run-at       document-idle
 // @grant        none
@@ -15,11 +15,12 @@
  *
  * Performance optimizations:
  * - Debounced input handlers to reduce unnecessary updates
- * - RequestAnimationFrame for smooth scrolling
+ * - RequestAnimationFrame for smooth scrolling where user-visible; direct scroll for data collection
  * - Batch DOM updates using DocumentFragment
  * - LRU cache for address data
  * - Performance monitoring with debug mode
- * - Single-pass address cleaning (no redundant processing)
+ * - Single-pass address cleaning
+ * - Scoped DOM queries and reduced waits for faster address fetch
  *
  * Reliability improvements:
  * - Comprehensive error handling with try-catch blocks
@@ -61,23 +62,22 @@
 
   const CONFIG = {
     MAX_CACHE_SIZE: 500,
-    DEFAULT_STOP_N: 5,
+    DEFAULT_STOP_N: 3,
     MAX_SCROLL_LOOPS: 160,
     STAGNANT_THRESHOLD: 3,
-    BASE_SLEEP: 50,
-    SCROLL_DELAY: 120,
+    BASE_SLEEP: 40,
+    SCROLL_DELAY: 80,
     ROW_PROCESS_DELAY: 0,
-    INITIAL_WAIT_DELAY: 200,
-    MIN_SCROLL_AMOUNT: 260,
-    SCROLL_MULTIPLIER: 1.2,
+    INITIAL_WAIT_DELAY: 120,
+    MIN_SCROLL_AMOUNT: 320,
+    SCROLL_MULTIPLIER: 1.35,
     RETRY_ATTEMPTS: 3,
-    DEBOUNCE_DELAY: 300,
+    DEBOUNCE_DELAY: 220,
     FETCH_TIMEOUT: 15000,
     MAX_STOP_NUMBER: 999,
     MIN_STOP_NUMBER: 1,
   };
 
-  // Utility functions
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const norm = (s) => String(s ?? "").toLowerCase().trim();
   const firstLine = (t = "") => (t?.split("\n")?.[0] ?? "").trim();
@@ -108,12 +108,6 @@
       .replace(/\s{2,}/g, " ")
       .trim();
 
-  /**
-   * Debounce function execution
-   * @param {Function} fn - Function to debounce
-   * @param {number} delay - Delay in milliseconds
-   * @returns {Function} Debounced function
-   */
   const debounce = (fn, delay) => {
     let timeoutId;
     return function debounced(...args) {
@@ -122,41 +116,14 @@
     };
   };
 
-  /**
-   * Throttle function execution
-   * @param {Function} fn - Function to throttle
-   * @param {number} limit - Time limit in milliseconds
-   * @returns {Function} Throttled function
-   */
-  const throttle = (fn, limit) => {
-    let inThrottle;
-    return function throttled(...args) {
-      if (!inThrottle) {
-        fn.apply(this, args);
-        inThrottle = true;
-        setTimeout(() => (inThrottle = false), limit);
-      }
-    };
-  };
-
-  /**
-   * Validate and sanitize stop number input
-   * @param {*} value - Input value
-   * @returns {number} Validated stop number
-   */
   const validateStopNumber = (value) => {
-    const num = Number(value);
-    if (Number.isNaN(num) || !Number.isFinite(num)) {
+    const n = Number(value);
+    if (Number.isNaN(n) || !Number.isFinite(n)) {
       return CONFIG.DEFAULT_STOP_N;
     }
-    return Math.max(CONFIG.MIN_STOP_NUMBER, Math.min(CONFIG.MAX_STOP_NUMBER, Math.floor(num)));
+    return Math.max(CONFIG.MIN_STOP_NUMBER, Math.min(CONFIG.MAX_STOP_NUMBER, Math.floor(n)));
   };
 
-  /**
-   * Sanitize text input to prevent XSS
-   * @param {string} text - Input text
-   * @returns {string} Sanitized text
-   */
   const sanitizeText = (text) => {
     return String(text ?? "").replace(/[<>&"']/g, (char) => {
       const entities = {
@@ -175,14 +142,6 @@
       ? window.CSS.escape.bind(window.CSS)
       : (s) => String(s ?? "").replace(/[^\w-]/g, "\\$&");
 
-  const escAttr = (v) => String(v ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const escHtml = (v) => {
-    const div = document.createElement("div");
-    div.textContent = String(v ?? "");
-    return div.innerHTML;
-  };
-
-  // Enhanced logging
   const log = {
     info: (msg, ...args) => console.log(`[ONTH] ${msg}`, ...args),
     warn: (msg, ...args) => console.warn(`[ONTH] ${msg}`, ...args),
@@ -192,9 +151,6 @@
     },
   };
 
-  /**
-   * Performance monitoring utility
-   */
   const perf = {
     timers: new Map(),
     start(label) {
@@ -213,14 +169,6 @@
     },
   };
 
-  /**
-   * Fetch with timeout and retry support
-   * @param {string} url - URL to fetch
-   * @param {object} options - Fetch options
-   * @param {number} timeout - Timeout in milliseconds
-   * @param {number} retries - Number of retry attempts
-   * @returns {Promise<Response>}
-   */
   const fetchWithTimeout = async (url, options = {}, timeout = CONFIG.FETCH_TIMEOUT, retries = CONFIG.RETRY_ATTEMPTS) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeout);
@@ -231,7 +179,7 @@
 
       if (!response.ok && retries > 0) {
         log.warn(`Fetch failed (${response.status}), retrying...`);
-        await sleep(500);
+        await sleep(400);
         return fetchWithTimeout(url, options, timeout, retries - 1);
       }
 
@@ -243,7 +191,7 @@
         log.error('Fetch timeout:', url);
         if (retries > 0) {
           log.warn('Retrying after timeout...');
-          await sleep(500);
+          await sleep(400);
           return fetchWithTimeout(url, options, timeout, retries - 1);
         }
       }
@@ -252,7 +200,6 @@
     }
   };
 
-  // Mutex for async operations
   class Mutex {
     constructor() {
       this._locked = false;
@@ -279,7 +226,6 @@
 
   const globalMutex = new Mutex();
 
-  // LRU Cache implementation
   class LRUCache {
     constructor(maxSize = CONFIG.MAX_CACHE_SIZE) {
       this._cache = new Map();
@@ -316,11 +262,6 @@
     }
   }
 
-  /**
-   * Show toast notification with accessibility support
-   * @param {string} msg - Message to display
-   * @param {boolean|null} ok - Status indicator (true=success, false=error, null=info)
-   */
   function toast(msg, ok = null) {
     try {
       let d = document.getElementById("__onth_snap_toast__");
@@ -331,26 +272,25 @@
         d.setAttribute("aria-live", "polite");
         d.style.cssText = [
           "position:fixed;right:16px;bottom:16px;z-index:2147483647",
-          "background:linear-gradient(135deg, rgba(15,23,42,.96), rgba(2,6,23,.94))",
-          "color:#e5e7eb;border:1px solid rgba(59,130,246,.3)",
+          "background:linear-gradient(135deg, rgba(10,14,28,.95), rgba(8,12,24,.93))",
+          "color:#e5e7eb;border:1px solid rgba(59,130,246,.35)",
           "padding:12px 16px;border-radius:12px;opacity:0;transform:translateY(10px)",
           "transition:all 250ms cubic-bezier(0.4, 0, 0.2, 1);pointer-events:none",
           "max-width:62vw;white-space:nowrap;overflow:hidden;text-overflow:ellipsis",
-          "box-shadow:0 8px 24px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.05)",
+          "box-shadow:0 8px 24px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.06)",
           "backdrop-filter:blur(12px);font-size:13px;font-weight:600",
         ].join(";");
         document.body.appendChild(d);
       }
 
-      // Update border and icon based on status
       if (ok === true) {
-        d.style.borderColor = "rgba(34,197,94,.4)";
+        d.style.borderColor = "rgba(34,197,94,.6)";
         d.textContent = "✅ " + sanitizeText(String(msg ?? ""));
       } else if (ok === false) {
-        d.style.borderColor = "rgba(239,68,68,.4)";
+        d.style.borderColor = "rgba(239,68,68,.6)";
         d.textContent = "❌ " + sanitizeText(String(msg ?? ""));
       } else {
-        d.style.borderColor = "rgba(59,130,246,.35)";
+        d.style.borderColor = "rgba(59,130,246,.55)";
         d.textContent = "ℹ️ " + sanitizeText(String(msg ?? ""));
       }
 
@@ -366,11 +306,6 @@
     }
   }
 
-  /**
-   * Clean and format address from raw text
-   * @param {string} raw - Raw address text
-   * @returns {string} Cleaned address
-   */
   function cleanAddress(raw) {
     try {
       const txt = String(raw ?? "").replace(/\r/g, "\n");
@@ -406,11 +341,6 @@
     }
   }
 
-  /**
-   * Copy text to clipboard with multiple fallback methods
-   * @param {string} text - Text to copy
-   * @returns {Promise<boolean>} Success status
-   */
   window.ONTH_copyText = async (text) => {
     text = String(text ?? "");
     if (!text) {
@@ -418,7 +348,6 @@
       return false;
     }
 
-    // Method 1: Modern Clipboard API
     try {
       await navigator.clipboard.writeText(text);
       return true;
@@ -426,7 +355,6 @@
       log.warn("Clipboard API failed:", err);
     }
 
-    // Method 2: execCommand (deprecated but still works)
     try {
       const ta = document.createElement("textarea");
       ta.value = text;
@@ -442,7 +370,6 @@
       log.warn("execCommand copy failed:", err);
     }
 
-    // Method 3: Legacy copy function
     try {
       if (typeof copy === "function") {
         copy(text);
@@ -455,17 +382,9 @@
     return false;
   };
 
-
-
   /* ---------------------------
      Driver rows
   ---------------------------- */
-  /**
-   * Extract phone number from driver row
-   * @param {HTMLElement} row - Row element
-   * @param {string[]} lines - Text lines
-   * @returns {string} Phone number
-   */
   function extractPhone(row, lines) {
     if (!row) return "";
 
@@ -497,11 +416,6 @@
     return "";
   }
 
-  /**
-   * Parse driver row element into structured data
-   * @param {HTMLElement} row - Row element
-   * @returns {object} Driver data
-   */
   function parseRow(row) {
     try {
       const text = row?.innerText ?? "";
@@ -533,6 +447,9 @@
 
       const fix = (v) => (typeof v === "number" && !Number.isNaN(v) ? v : null);
       const key = `${norm(name)}|${norm(phone)}`;
+      const nameLower = norm(name);
+      const numberDigits = digits(phone);
+      const numberLower = norm(phone);
 
       return {
         key,
@@ -542,6 +459,9 @@
         avgPerHour: fix(avgPerHour),
         lastHourPace: fix(lastHourPace),
         stopsLeft: typeof stopsLeft === "number" ? stopsLeft : null,
+        nameLower,
+        numberDigits,
+        numberLower,
       };
     } catch (err) {
       log.error("parseRow error:", err);
@@ -553,19 +473,15 @@
         avgPerHour: null,
         lastHourPace: null,
         stopsLeft: null,
+        nameLower: "[error]",
+        numberDigits: "",
+        numberLower: "",
       };
     }
   }
 
-  // DOM element tracking for cleanup
   const trackedElements = new WeakMap();
 
-  /**
-   * Smoothly scroll element using requestAnimationFrame
-   * @param {HTMLElement} element - Element to scroll
-   * @param {number} target - Target scroll position
-   * @returns {Promise<void>}
-   */
   const smoothScrollTo = (element, target) => {
     return new Promise((resolve) => {
       if (!element) {
@@ -575,14 +491,13 @@
 
       const start = element.scrollTop;
       const distance = target - start;
-      const duration = 300; // ms
+      const duration = 260;
       const startTime = performance.now();
 
       const animate = (currentTime) => {
         const elapsed = currentTime - startTime;
         const progress = Math.min(elapsed / duration, 1);
 
-        // Easing function
         const easeProgress = progress < 0.5
           ? 2 * progress * progress
           : -1 + (4 - 2 * progress) * progress;
@@ -600,10 +515,6 @@
     });
   };
 
-  /**
-   * Collect all driver data by scrolling through the list
-   * @returns {Promise<Array>} Array of driver data
-   */
   async function collectAllDrivers() {
     perf.start('collectAllDrivers');
 
@@ -615,7 +526,6 @@
       return [];
     }
 
-    // Cleanup previous markers
     for (const r of document.querySelectorAll(SELECTORS.rows)) {
       if (trackedElements.has(r)) {
         trackedElements.delete(r);
@@ -635,7 +545,7 @@
     let stagnant = 0;
 
     for (let loops = 0; loops < CONFIG.MAX_SCROLL_LOOPS; loops++) {
-      const rows = [...document.querySelectorAll(SELECTORS.rows)];
+      const rows = [...(panel.querySelectorAll?.(SELECTORS.rows) || document.querySelectorAll(SELECTORS.rows))];
       for (const row of rows) {
         if (trackedElements.has(row)) continue;
         trackedElements.set(row, true);
@@ -657,10 +567,10 @@
 
       const scrollAmount = Math.max(CONFIG.MIN_SCROLL_AMOUNT, panel.clientHeight * CONFIG.SCROLL_MULTIPLIER);
       try {
-        await smoothScrollTo(panel, panel.scrollTop + scrollAmount);
-      } catch (err) {
-        log.warn("Smooth scroll failed, using fallback:", err);
         panel.scrollTop += scrollAmount;
+      } catch (err) {
+        log.warn("Scroll failed, using smooth fallback:", err);
+        await smoothScrollTo(panel, panel.scrollTop + scrollAmount);
       }
       await sleep(CONFIG.SCROLL_DELAY);
     }
@@ -670,9 +580,6 @@
     return out;
   }
 
-  /* ---------------------------
-     Driver click + hide toggle + address copy
-  ---------------------------- */
   const waitFor = async (fn, { timeout = 9000, interval = 120 } = {}) => {
     const t0 = performance.now();
     while (performance.now() - t0 < timeout) {
@@ -805,8 +712,8 @@
         panel.scrollTop + panel.clientHeight >= panel.scrollHeight - 6;
       if (atBottom) break;
 
-      panel.scrollTop += Math.max(260, panel.clientHeight * 0.9);
-      await sleep(160);
+      panel.scrollTop += Math.max(320, panel.clientHeight * 0.9);
+      await sleep(140);
     }
 
     try {
@@ -859,13 +766,13 @@
       await attempts[i]();
       const ok = await waitFor(() => (inDriverView() ? true : null), {
         timeout: 12000,
-        interval: 200,
+        interval: 160,
       });
       if (ok) {
         log.info("Successfully entered driver view");
         return row;
       }
-      await sleep(300);
+      await sleep(220);
     }
 
     log.error("All click attempts failed");
@@ -884,7 +791,6 @@
   }
 
   function findHideToggle() {
-    // Try specific selector first
     let el = document.querySelector('input[role="switch"][type="checkbox"]');
     if (el && /hide completed/i.test(el.closest("label,div,span")?.textContent || "")) {
       return el;
@@ -937,9 +843,9 @@
       search.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 5; i++) {
       window.scrollBy({ top: window.innerHeight * 0.5, behavior: "smooth" });
-      await sleep(180);
+      await sleep(140);
     }
   }
 
@@ -953,23 +859,17 @@
       const current = isOn(el);
       if (current !== want) {
         clickCenter(el);
-        await sleep(200);
+        await sleep(180);
       }
     } else {
       clickCenter(el);
-      await sleep(200);
+      await sleep(180);
     }
     const finalState = isOn(findHideToggle());
     log.info("Hide completed state:", finalState);
     return finalState;
   }
 
-  /* ---------------------------
-     Stop DOM helpers
-  ---------------------------- */
-  /* ---------------------------
-     Stop DOM helpers
-  ---------------------------- */
   const isScrollable = (el) => {
     if (!el) return false;
     const s = getComputedStyle(el);
@@ -1030,162 +930,94 @@
 
   function findAddressInPanel(panel) {
     if (!panel) return null;
-
-    const quick = panel.querySelector(
-      '[data-testid*="address" i], [data-attr*="address" i], [aria-label*="address" i]'
-    );
+    const quick = panel.querySelector('[data-testid*="address" i], [data-attr*="address" i], [aria-label*="address" i]');
     if (quick?.innerText?.trim()) return quick;
-
     const nodes = [...panel.querySelectorAll("div,span,p,li,td")].filter(
       (n) => n?.innerText?.trim()
     );
-
     const label = nodes.find((n) => /^address$/i.test(n.innerText.trim()));
     if (label) {
       const idx = nodes.indexOf(label);
       for (let k = idx + 1; k < Math.min(idx + 12, nodes.length); k++) {
         const t = nodes[k].innerText.trim();
-        if (t && (/,/.test(t) || RX.zip.test(t))) return nodes[k];
+        if (t && /,/.test(t)) return nodes[k];
       }
     }
-
     return (
       nodes.find((x) => {
         const t = x.innerText || "";
-        return /,/.test(t) && (RX.zip.test(t) || /\b[A-Z]{2}\b/.test(t));
+        return /,/.test(t);
       }) || null
     );
   }
 
-  async function locateHeaderByStopNum(stopNum) {
+  async function collectRemainingStopsNth(nthRemaining = 3) {
     const scroller = pickStopScroller();
-    if (!scroller) return null;
+    const want = Math.max(1, Number(nthRemaining) || 3);
 
-    const tryFind = () => {
-      const headers = getStopHeaders();
-      for (const h of headers) {
-        const p = parseStopHeader(h);
-        if (p.stopNum === Number(stopNum)) return h;
-      }
-      return null;
-    };
-
-    let h = tryFind();
-    if (h) return h;
-
-    try {
-      scroller.scrollTop = 0;
-    } catch (err) {
-      log.warn("Scroll to top failed:", err);
-    }
-    await sleep(CONFIG.BASE_SLEEP);
-
-    for (let i = 0; i < 110; i++) {
-      h = tryFind();
-      if (h) return h;
-
-      const atBottom =
-        scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 6;
-      if (atBottom) break;
-
-      try {
-        scroller.scrollTop += Math.max(520, scroller.clientHeight * 0.9);
-      } catch (err) {
-        log.warn("Scroll failed:", err);
-      }
-      await sleep(150);
-    }
-    return null;
-  }
-
-  async function domExpandAndGetAddressForStop(stopNum) {
-    const header = await locateHeaderByStopNum(stopNum);
-    if (!header) {
-      log.warn("Header not found for stop:", stopNum);
-      return null;
-    }
-
-    header.scrollIntoView({ behavior: "smooth", block: "center" });
-    await sleep(CONFIG.BASE_SLEEP);
-
-    if (header.getAttribute("aria-expanded") !== "true") {
-      clickCenter(header);
-      await sleep(260);
-    }
-
-    const ctrlId = header.getAttribute("aria-controls");
-    const panel = (ctrlId && document.getElementById(ctrlId)) || header.nextElementSibling;
-    if (!panel) {
-      log.warn("Panel not found for stop:", stopNum);
-      return null;
-    }
-
-    const node = findAddressInPanel(panel);
-    if (!node?.innerText) {
-      log.warn("Address node not found for stop:", stopNum);
-      return null;
-    }
-
-    return cleanAddress(node.innerText) || null;
-  }
-
-  async function collectRemainingStopsNth(nthRemaining = 5) {
-    const scroller = pickStopScroller();
-    const want = Math.max(1, Number(nthRemaining) || 5);
-
-    try {
-      scroller.scrollTop = 0;
-    } catch (err) {
-      log.warn("Scroll to top failed:", err);
-    }
-    await sleep(140);
+    try { scroller.scrollTop = 0; } catch {}
+    await sleep(80);
 
     const seen = new Map();
-    let stagnant = 0;
-    let lastSeen = 0;
+    let stagnant = 0, lastSeen = 0;
 
-    for (let loops = 0; loops < CONFIG.MAX_SCROLL_LOOPS; loops++) {
+    for (let loops = 0; loops < 200; loops++) {
       const headers = getStopHeaders();
       for (const h of headers) {
         const p = parseStopHeader(h);
         if (p.stopNum != null && !Number.isNaN(p.stopNum)) seen.set(p.stopNum, p);
       }
 
-      const remaining = [...seen.values()]
-        .filter((x) => !x.done)
-        .sort((a, b) => a.stopNum - b.stopNum);
-      if (remaining.length >= want) {
-        log.info(`Found ${remaining.length} remaining stops`);
-        return { remaining, target: remaining[want - 1] };
-      }
+      const remaining = [...seen.values()].filter(x => !x.done).sort((a, b) => a.stopNum - b.stopNum);
+      if (remaining.length >= want) return { remaining, target: remaining[want - 1] };
 
       const nowSeen = seen.size;
       stagnant = nowSeen === lastSeen ? stagnant + 1 : 0;
       lastSeen = nowSeen;
 
-      const atBottom =
-        scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 6;
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 6;
       if (atBottom && stagnant >= CONFIG.STAGNANT_THRESHOLD) break;
 
-      try {
-        scroller.scrollTop += Math.max(520, scroller.clientHeight * 0.9);
-      } catch (err) {
-        log.warn("Scroll failed:", err);
-      }
-      await sleep(200);
+      scroller.scrollTop += Math.max(520, scroller.clientHeight * 0.9);
+      await sleep(120);
     }
 
-    const remaining = [...seen.values()]
-      .filter((x) => !x.done)
-      .sort((a, b) => a.stopNum - b.stopNum);
-    log.info(`Final: ${remaining.length} remaining stops found`);
+    const remaining = [...seen.values()].filter(x => !x.done).sort((a, b) => a.stopNum - b.stopNum);
     return { remaining, target: remaining[want - 1] || null };
   }
 
-  async function copyNthRemainingStopAddress(nthRemaining = 5) {
+  async function domExpandAndGetAddressForStop(stopNum) {
+    const scroller = pickStopScroller();
+    const headers = getStopHeaders();
+    let target = headers.find(h => parseStopHeader(h).stopNum === Number(stopNum));
+    if (!target) {
+      for (let i = 0; i < 80 && !target; i++) {
+        scroller.scrollTop += Math.max(520, scroller.clientHeight * 0.9);
+        await sleep(90);
+        target = getStopHeaders().find(h => parseStopHeader(h).stopNum === Number(stopNum));
+      }
+    }
+    if (!target) return null;
+
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    await sleep(120);
+    if (target.getAttribute("aria-expanded") !== "true") {
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+      await sleep(180);
+    }
+
+    const ctrlId = target.getAttribute("aria-controls");
+    const panel = (ctrlId && document.getElementById(ctrlId)) || target.nextElementSibling;
+    if (!panel) return null;
+
+    const node = findAddressInPanel(panel);
+    return node?.innerText ? cleanAddress(node.innerText) : null;
+  }
+
+  async function copyNthRemainingStopAddress(nthRemaining = 3) {
     perf.start('copyNthRemainingStopAddress');
 
-    const want = Math.max(1, Number(nthRemaining) || 5);
+    const want = Math.max(1, Number(nthRemaining) || 3);
     const { target } = await collectRemainingStopsNth(want);
     if (!target?.stopNum) {
       log.warn("No target stop found");
@@ -1193,28 +1025,16 @@
       return null;
     }
 
-    log.info("Target stop:", target.stopNum);
-
-    // Use DOM-based address retrieval
     const domAddr = await domExpandAndGetAddressForStop(target.stopNum);
-
     if (!domAddr) {
       log.warn("No DOM address found");
       perf.end('copyNthRemainingStopAddress');
       return null;
     }
 
-    const full = domAddr;  // Already cleaned in domExpandAndGetAddressForStop
-    if (!full) {
-      log.warn("Address cleaning failed");
-      perf.end('copyNthRemainingStopAddress');
-      return null;
-    }
-
-    await window.ONTH_copyText(full);
-    log.info("Copied from DOM:", full);
+    await window.ONTH_copyText(domAddr);
     perf.end('copyNthRemainingStopAddress');
-    return { stopNum: target.stopNum, full, raw: target, source: "dom" };
+    return { stopNum: target.stopNum, full: domAddr, raw: target, source: "dom" };
   }
 
   async function goBackToList() {
@@ -1250,7 +1070,7 @@
           log.warn("Back button click failed:", err);
         }
       }
-      await sleep(380);
+      await sleep(240);
       if (document.querySelector(ROW_SEL)) {
         log.info("Returned to list view");
         return true;
@@ -1265,16 +1085,16 @@
     }
     const ok = await waitFor(() => document.querySelector(ROW_SEL), {
       timeout: 11000,
-      interval: 200,
+      interval: 180,
     });
     return !!ok;
   }
 
-  async function openToggleCopyStop(name, stopN = 5, phone = "") {
+  async function openToggleCopyStop(name, stopN = 3, phone = "") {
     if (!document.querySelector(ROW_SEL)) {
       log.info("Not on list view, going back");
       await goBackToList();
-      await sleep(450);
+      await sleep(280);
     }
 
     const listPanel =
@@ -1292,15 +1112,15 @@
       interval: 200,
     });
 
-    await sleep(250);
+    await sleep(220);
     await scrollToHideArea();
     await setHideCompleted(true);
-    await sleep(350);
+    await sleep(260);
 
-    const res = await copyNthRemainingStopAddress(Number(stopN) || 5);
+    const res = await copyNthRemainingStopAddress(Number(stopN) || 3);
 
     await goBackToList();
-    await sleep(300);
+    await sleep(240);
 
     try {
       if (listPanel && typeof savedScroll === "number")
@@ -1328,22 +1148,23 @@
     addrByKey: new LRUCache(CONFIG.MAX_CACHE_SIZE),
     pendingKey: null,
     openKey: null,
+    _lastRenderSig: "",
   };
 
   const STYLES = `
   #__onth_snap_btn__ {
     position: fixed; top: 12px; right: 12px; z-index: 2147483647;
-    padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(59,130,246,.35);
-    background: linear-gradient(135deg, rgba(37,99,235,.92), rgba(29,78,216,.88));
-    color: #fff; cursor: pointer; font-weight: 800; font-size: 13px;
-    box-shadow: 0 4px 12px rgba(37,99,235,.35), 0 8px 24px rgba(0,0,0,.25);
+    padding: 10px 14px; border-radius: 10px; border: 1px solid rgba(79,139,255,.55);
+    background: linear-gradient(135deg, #1d4ed8, #0f3ea1);
+    color: #f8fafc; cursor: pointer; font-weight: 800; font-size: 13px;
+    box-shadow: 0 4px 14px rgba(15,58,128,.4), 0 8px 26px rgba(0,0,0,.36);
     backdrop-filter: blur(10px);
-    transition: all 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 220ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   #__onth_snap_btn__:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(37,99,235,.45), 0 12px 32px rgba(0,0,0,.3);
-    background: linear-gradient(135deg, rgba(59,130,246,.95), rgba(37,99,235,.92));
+    box-shadow: 0 6px 18px rgba(34,102,220,.48), 0 12px 30px rgba(0,0,0,.32);
+    background: linear-gradient(135deg, #2a64f6, #1d4ed8);
   }
   #__onth_snap_btn__:active {
     transform: translateY(0);
@@ -1352,71 +1173,71 @@
   #__onth_snap_drawer__ {
     position: fixed; top: 64px; right: 12px; width: 440px; max-width: calc(100vw - 24px);
     height: calc(100vh - 92px); z-index: 2147483646;
-    background: linear-gradient(145deg, rgba(15,23,42,.94), rgba(2,6,23,.92));
+    background: linear-gradient(145deg, #0b1221, #0f172a);
     color: #e5e7eb;
-    border: 1px solid rgba(59,130,246,.2);
+    border: 1px solid rgba(79,139,255,.28);
     border-radius: 16px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.05);
+    box-shadow: 0 20px 64px rgba(0,0,0,.62), 0 0 0 1px rgba(255,255,255,.05);
     overflow: hidden; display: none;
     backdrop-filter: blur(16px);
   }
   #__onth_snap_drawer__.open { display: flex; flex-direction: column; }
   #__onth_snap_head__ {
     padding: 14px 16px 12px;
-    border-bottom: 1px solid rgba(59,130,246,.15);
-    background: rgba(30,41,59,.4);
+    border-bottom: 1px solid rgba(79,139,255,.22);
+    background: rgba(21,30,53,.55);
     display: flex; align-items: center; gap: 10px;
   }
   #__onth_snap_title__ {
     font-weight: 900;
     font-size: 15px;
-    color: #f1f5f9;
+    color: #f8fafc;
     letter-spacing: -0.01em;
   }
   #__onth_snap_count__ {
     margin-left: auto;
     font-size: 12px;
-    color: rgba(148,163,184,.85);
+    color: rgba(203,213,225,.9);
     font-weight: 600;
   }
   #__onth_snap_controls__ {
     padding: 12px 16px;
     display: flex; gap: 8px; align-items: center;
-    border-bottom: 1px solid rgba(59,130,246,.12);
-    background: rgba(30,41,59,.25);
+    border-bottom: 1px solid rgba(79,139,255,.18);
+    background: rgba(18,26,44,.45);
   }
   #__onth_snap_controls__ input {
-    background: rgba(30,41,59,.6);
+    background: rgba(23,33,53,.7);
     color: #e5e7eb;
-    border: 1px solid rgba(59,130,246,.25);
+    border: 1px solid rgba(79,139,255,.28);
     border-radius: 10px;
     padding: 9px 12px;
     font-size: 13px;
     outline: none;
-    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 180ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   #__onth_snap_controls__ input:focus {
-    border-color: rgba(59,130,246,.5);
-    background: rgba(30,41,59,.75);
-    box-shadow: 0 0 0 3px rgba(59,130,246,.1);
+    border-color: rgba(147,197,253,.7);
+    background: rgba(23,33,53,.85);
+    box-shadow: 0 0 0 3px rgba(147,197,253,.28);
   }
   #__onth_snap_filter__ { flex: 1; }
   #__onth_snap_stop__ { width: 86px; text-align: center; }
   #__onth_snap_refresh__ {
-    background: linear-gradient(135deg, #3b82f6, #2563eb);
+    background: linear-gradient(135deg, #2e7cf0, #1f5ccc);
     border: 0;
-    color: #fff;
+    color: #f8fafc;
     border-radius: 10px;
     padding: 9px 14px;
     font-weight: 900;
     font-size: 13px;
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(37,99,235,.3);
-    transition: all 220ms cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 10px rgba(34,112,230,.35);
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   #__onth_snap_refresh__:hover {
-    background: linear-gradient(135deg, #60a5fa, #3b82f6);
-    box-shadow: 0 4px 12px rgba(37,99,235,.4);
+    background: linear-gradient(135deg, #4f9cff, #2e7cf0);
+    box-shadow: 0 4px 14px rgba(34,112,230,.44);
     transform: translateY(-1px);
   }
   #__onth_snap_refresh__:active {
@@ -1425,19 +1246,19 @@
   }
   #__onth_snap_close__ {
     margin-left: 6px;
-    background: rgba(30,41,59,.6);
-    border: 1px solid rgba(148,163,184,.25);
+    background: rgba(23,33,53,.75);
+    border: 1px solid rgba(148,163,184,.35);
     color: #e5e7eb;
     border-radius: 10px;
     padding: 9px 12px;
     font-weight: 900;
     font-size: 13px;
     cursor: pointer;
-    transition: all 220ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   #__onth_snap_close__:hover {
-    background: rgba(51,65,85,.75);
-    border-color: rgba(148,163,184,.35);
+    background: rgba(37,47,69,.85);
+    border-color: rgba(203,213,225,.35);
     transform: translateY(-1px);
   }
   #__onth_snap_close__:active {
@@ -1448,21 +1269,21 @@
   #__onth_snap_table__ { width: 100%; border-collapse: collapse; }
   #__onth_snap_table__ thead th {
     position: sticky; top: 0;
-    background: linear-gradient(180deg, rgba(15,23,42,.98), rgba(15,23,42,.95));
+    background: linear-gradient(180deg, rgba(12,18,34,.98), rgba(12,18,34,.95));
     padding: 12px 12px;
     font-size: 12px;
-    color: rgba(148,163,184,1);
+    color: rgba(203,213,225,1);
     text-align: left;
     cursor: pointer;
-    border-bottom: 1px solid rgba(59,130,246,.2);
+    border-bottom: 1px solid rgba(79,139,255,.28);
     user-select: none;
     font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: uppercase;
-    transition: color 200ms ease;
+    transition: color 180ms ease;
   }
   #__onth_snap_table__ thead th:hover {
-    color: rgba(59,130,246,.95);
+    color: rgba(147,197,253,.95);
   }
   #__onth_snap_table__ tbody td {
     padding: 11px 12px;
@@ -1471,20 +1292,20 @@
     vertical-align: top;
   }
   #__onth_snap_table__ tbody tr {
-    transition: background-color 200ms ease;
+    transition: background-color 160ms ease;
   }
   #__onth_snap_table__ tbody tr:hover {
-    background: rgba(59,130,246,.08);
+    background: rgba(79,139,255,.10);
   }
   .__onth_mono { font-variant-numeric: tabular-nums; }
   .__onth_row { cursor: pointer; }
   .__onth_name {
     font-weight: 900;
-    color: #f1f5f9;
+    color: #f8fafc;
   }
   .__onth_detail {
-    background: linear-gradient(180deg, rgba(30,41,59,.45), rgba(15,23,42,.35));
-    border-bottom: 1px solid rgba(59,130,246,.15);
+    background: linear-gradient(180deg, rgba(16,25,44,.55), rgba(11,18,34,.5));
+    border-bottom: 1px solid rgba(79,139,255,.2);
   }
   .__onth_detailBox { padding: 14px 14px 16px; display: grid; gap: 10px; }
   .__onth_kv { display: grid; grid-template-columns: 86px 1fr; gap: 8px 12px; }
@@ -1502,19 +1323,19 @@
   .__onth_pills { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
   .__onth_pillNoBg { border: 0 !important; background: transparent !important; padding: 0 !important; box-shadow: none !important; }
   .__onth_btn {
-    border: 1px solid rgba(148,163,184,.3);
-    background: rgba(30,41,59,.5);
+    border: 1px solid rgba(148,163,184,.32);
+    background: rgba(23,33,53,.6);
     color: #e5e7eb;
     padding: 9px 12px;
     border-radius: 10px;
     font-weight: 900;
     font-size: 12px;
     cursor: pointer;
-    transition: all 220ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .__onth_btn:hover {
-    background: rgba(51,65,85,.65);
-    border-color: rgba(148,163,184,.45);
+    background: rgba(37,47,69,.7);
+    border-color: rgba(203,213,225,.45);
     transform: translateY(-1px);
   }
   .__onth_btn:active {
@@ -1522,15 +1343,15 @@
     transition: all 100ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .__onth_btnPrimary {
-    border-color: rgba(59,130,246,.5);
-    background: linear-gradient(135deg, rgba(59,130,246,.85), rgba(37,99,235,.75));
+    border-color: rgba(79,139,255,.6);
+    background: linear-gradient(135deg, #2e7cf0, #1f5ccc);
     color: #fff;
-    box-shadow: 0 2px 8px rgba(37,99,235,.25);
+    box-shadow: 0 2px 10px rgba(34,112,230,.32);
   }
   .__onth_btnPrimary:hover {
-    background: linear-gradient(135deg, rgba(96,165,250,.9), rgba(59,130,246,.85));
-    border-color: rgba(59,130,246,.65);
-    box-shadow: 0 4px 12px rgba(37,99,235,.35);
+    background: linear-gradient(135deg, #4f9cff, #2e7cf0);
+    border-color: rgba(147,197,253,.65);
+    box-shadow: 0 4px 12px rgba(34,112,230,.4);
   }
   .__onth_btnSmall {
     padding: 7px 10px;
@@ -1558,18 +1379,22 @@
       : "";
   }
 
-  /**
-   * Rebuild filtered and sorted view of driver data
-   */
   function rebuildView() {
     perf.start('rebuildView');
 
-    const f = norm(UI.filter);
+    const fRaw = String(UI.filter ?? "");
+    const f = norm(fRaw);
+    const fDigits = digits(fRaw);
+
     let v = UI.data.slice();
-    if (f)
-      v = v.filter(
-        (r) => norm(r.name).includes(f) || norm(r.number).includes(f)
-      );
+    if (f) {
+      v = v.filter((r) => {
+        const matchName = r.nameLower.includes(f);
+        const matchNumText = r.numberLower.includes(f);
+        const matchDigits = fDigits ? r.numberDigits.includes(fDigits) : false;
+        return matchName || matchNumText || matchDigits;
+      });
+    }
 
     const k = UI.sortKey;
     const dir = UI.sortDir;
@@ -1580,7 +1405,7 @@
       const na = typeof va === "number",
         nb = typeof vb === "number";
       let c = 0;
-      if (na && nb) c = va - vb;
+      if (na && nb) c = (va ?? 0) - (vb ?? 0);
       else
         c = String(va ?? "").localeCompare(String(vb ?? ""), undefined, {
           numeric: true,
@@ -1596,9 +1421,6 @@
     perf.end('rebuildView');
   }
 
-  /**
-   * Batch DOM updates for table rendering
-   */
   function renderTable() {
     perf.start('renderTable');
 
@@ -1608,7 +1430,19 @@
       return;
     }
 
-    // Use DocumentFragment for batch DOM updates
+    const sig = [
+      UI.view.length,
+      UI.view.map((r) => r.key).join("|"),
+      UI.openKey || "",
+      UI.pendingKey || "",
+      UI.stopN
+    ].join("::");
+    if (sig === UI._lastRenderSig) {
+      perf.end('renderTable');
+      return;
+    }
+    UI._lastRenderSig = sig;
+
     const fragment = document.createDocumentFragment();
 
     for (const r of UI.view) {
@@ -1708,9 +1542,7 @@
       }
     }
 
-    // Single DOM update
-    tbody.innerHTML = "";
-    tbody.appendChild(fragment);
+    tbody.replaceChildren(fragment);
 
     perf.end('renderTable');
   }
@@ -1728,6 +1560,7 @@
       const data = await collectAllDrivers();
       UI.data = data;
       if (UI.openKey && !UI.data.some((r) => r.key === UI.openKey)) UI.openKey = null;
+      UI._lastRenderSig = "";
       rebuildView();
       renderTable();
       toast(`Loaded ${data.length} drivers`, true);
@@ -1752,6 +1585,7 @@
 
     if (UI.addrByKey.has(cacheKey)) {
       UI.openKey = row.key;
+      UI._lastRenderSig = "";
       renderTable();
       toast(`Using cached stop ${stopN}`, true);
       return;
@@ -1763,6 +1597,7 @@
       UI.pendingKey = row.key;
 
       if (UI.openKey !== row.key) UI.openKey = row.key;
+      UI._lastRenderSig = "";
       renderTable();
 
       toast(`Copying stop ${stopN}…`);
@@ -1776,11 +1611,13 @@
       }
 
       UI.pendingKey = null;
+      UI._lastRenderSig = "";
       renderTable();
     } catch (e) {
       log.error("Request address failed:", e);
       toast("Failed ✖", false);
       UI.pendingKey = null;
+      UI._lastRenderSig = "";
       renderTable();
     } finally {
       UI.busy = false;
@@ -1788,9 +1625,6 @@
     }
   }
 
-  /**
-   * Cleanup function for memory leak prevention
-   */
   const cleanup = {
     listeners: [],
     intervals: [],
@@ -1811,7 +1645,6 @@
     },
 
     removeAll() {
-      // Remove event listeners
       for (const { element, event, handler, options } of this.listeners) {
         try {
           element?.removeEventListener(event, handler, options);
@@ -1821,13 +1654,11 @@
       }
       this.listeners = [];
 
-      // Clear intervals
       for (const id of this.intervals) {
         clearInterval(id);
       }
       this.intervals = [];
 
-      // Disconnect observers
       for (const observer of this.observers) {
         try {
           observer?.disconnect();
@@ -1841,14 +1672,10 @@
     }
   };
 
-  // Global cleanup on page unload
   if (typeof window !== 'undefined') {
     window.addEventListener('beforeunload', () => cleanup.removeAll());
   }
 
-  /**
-   * Inject UI elements into the page
-   */
   function injectUI() {
     if (document.getElementById("__onth_snap_drawer__")) return;
 
@@ -1899,7 +1726,7 @@
     stopInput.min = String(CONFIG.MIN_STOP_NUMBER);
     stopInput.max = String(CONFIG.MAX_STOP_NUMBER);
     stopInput.value = String(CONFIG.DEFAULT_STOP_N);
-    stopInput.title = "Nth remaining stop (5 = 5th remaining)";
+    stopInput.title = "Nth remaining stop (3 = 3rd remaining)";
     stopInput.setAttribute("aria-label", "Stop number");
 
     const filterInput = document.createElement("input");
@@ -1963,7 +1790,6 @@
 
     document.body.appendChild(drawer);
 
-    // Event handlers with debouncing
     cleanup.addListener(closeBtn, "click", closeDrawer);
 
     const debouncedRefresh = debounce(refreshSnapshot, CONFIG.DEBOUNCE_DELAY);
@@ -1971,6 +1797,7 @@
 
     const debouncedFilter = debounce((e) => {
       UI.filter = sanitizeText(String(e.target?.value ?? ""));
+      UI._lastRenderSig = "";
       rebuildView();
       renderTable();
     }, CONFIG.DEBOUNCE_DELAY);
@@ -1980,6 +1807,7 @@
       const validated = validateStopNumber(e.target?.value);
       UI.stopN = validated;
       e.target.value = String(validated);
+      UI._lastRenderSig = "";
       toast(`Stop set to ${UI.stopN}`, null);
     };
     cleanup.addListener(stopInput, "input", debounce(handleStopInput, CONFIG.DEBOUNCE_DELAY));
@@ -1993,6 +1821,7 @@
         thead.querySelectorAll("th").forEach(t => t.setAttribute("aria-sort", "none"));
         th.setAttribute("aria-sort", UI.sortDir === "asc" ? "ascending" : "descending");
 
+        UI._lastRenderSig = "";
         rebuildView();
         renderTable();
       };
@@ -2039,6 +1868,7 @@
 
       const wasOpen = UI.openKey === key;
       UI.openKey = wasOpen ? null : key;
+      UI._lastRenderSig = "";
       renderTable();
       if (wasOpen) return;
 
@@ -2049,9 +1879,6 @@
     cleanup.addListener(drawer, "click", handleDrawerClick);
   }
 
-  /**
-   * Ensure UI is injected when DOM is ready
-   */
   function ensure() {
     if (!document.body) return;
     injectUI();
@@ -2072,12 +1899,17 @@
       clearInterval(initInterval);
       log.warn("Max init attempts reached");
     }
-  }, 250);
+  }, 220);
 
   cleanup.addInterval(initInterval);
 
   const observer = new MutationObserver(() => {
-    ensure();
+    if (observer.__pending) return;
+    observer.__pending = true;
+    requestAnimationFrame(() => {
+      observer.__pending = false;
+      ensure();
+    });
   });
 
   if (document.documentElement) {
@@ -2088,6 +1920,6 @@
     cleanup.addObserver(observer);
   }
 
-  log.info("Driver Snapshot v2.2.0 loaded");
+  log.info("Driver Snapshot v2.2.3 loaded");
   log.debug("Debug mode:", !!window.__ONTH_DEBUG__);
 })();
