@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Amazon Driver Snapshot
 // @namespace    https://github.com/onth/scripts
-// @version      2.2.3
+// @version      3.1.0
 // @description  In-page Driver Snapshot drawer. Click driver → open itinerary → hide completed → copy Nth *remaining* stop address (default 3) → auto-back. Optimized for performance, reliability, and accessibility.
 // @match        https://logistics.amazon.com/operations/execution/itineraries*
 // @run-at       document-idle
@@ -793,24 +793,6 @@
     el.dispatchEvent(new MouseEvent("click", opts));
   }
 
-  async function scrollToHideArea() {
-    const search =
-      document.querySelector('input[placeholder="Search..."]') ||
-      [...document.querySelectorAll("input,button,[role='switch']")].find((n) =>
-        /hide completed stops/i.test(
-          n.closest("label,div,span,section,form")?.textContent || ""
-        )
-      );
-    if (search) {
-      search.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
-    }
-    for (let i = 0; i < 5; i++) {
-      window.scrollBy({ top: window.innerHeight * 0.5, behavior: "smooth" });
-      await sleep(140);
-    }
-  }
-
   async function setHideCompleted(want) {
     const el = await waitFor(findHideToggle, { timeout: 9000, interval: 150 });
     if (!el) {
@@ -1075,7 +1057,6 @@
     });
 
     await sleep(220);
-    await scrollToHideArea();
     await setHideCompleted(true);
     await sleep(260);
 
@@ -1831,6 +1812,6 @@
     cleanup.addObserver(observer);
   }
 
-  log.info("Driver Snapshot v2.2.3 loaded");
+  log.info("Driver Snapshot v3.1.0 loaded");
   log.debug("Debug mode:", !!window.__ONTH_DEBUG__);
 })();
