@@ -2,7 +2,7 @@
 // @name         Amazon Driver Snapshot
 // @namespace    https://github.com/onth/scripts
 // @version      3.1.0
-// @description  In-page Driver Snapshot drawer. Click driver → open itinerary → hide completed → copy Nth *remaining* stop address (default 3) → auto-back. Optimized for performance, reliability, and accessibility.
+// @description  In-page Driver Snapshot drawer. Click driver → open itinerary → hide completed → copy Nth *remaining* stop address (default 3) → auto-back. Optimized for performance, reliability, and accessibility with a new UI.
 // @match        https://logistics.amazon.com/operations/execution/itineraries*
 // @run-at       document-idle
 // @grant        none
@@ -11,7 +11,9 @@
 // ==/UserScript==
 
 /**
- * Amazon Driver Snapshot Userscript
+ * Amazon Driver Snapshot Userscript v3.1.0
+ * Optimized for performance and updated with a new color scheme.
+ * This version includes critical fixes for address fetching reliability.
  *
  * Enable debug mode: window.__ONTH_DEBUG__ = true
  */
