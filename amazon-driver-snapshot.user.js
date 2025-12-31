@@ -242,33 +242,34 @@
   }
 
   // Centralized theme object — Dark mode with red accents
+// Dark mode — neutral charcoal (no blue) + red accents
 const THEME = {
-  // Core colors (dark mode)
-  bg: "#0b0f14",
-  bgSubtle: "#111827",
-  bgMuted: "#1f2933",
-  text: "#e5e7eb",
-  textStrong: "#f9fafb",
-  textMuted: "#9ca3af",
-  border: "rgba(148,163,184,.35)",
-  borderStrong: "rgba(226,232,240,.45)",
+  // Core colors (neutral dark)
+  bg: "#0e0e10",
+  bgSubtle: "#141416",
+  bgMuted: "#1b1b1f",
+  text: "#e6e6e6",
+  textStrong: "#ffffff",
+  textMuted: "#a1a1aa",
+  border: "rgba(255,255,255,.12)",
+  borderStrong: "rgba(255,255,255,.22)",
 
   // Red accents
-  primary: "#dc2626",       // Red-600
-  primaryHover: "#b91c1c",  // Red-700
+  primary: "#dc2626",
+  primaryHover: "#b91c1c",
 
-  buttonNeutralBg: "#1f2933",
-  buttonNeutralText: "#f9fafb",
-  buttonNeutralBorder: "rgba(148,163,184,.4)",
+  buttonNeutralBg: "#1b1b1f",
+  buttonNeutralText: "#ffffff",
+  buttonNeutralBorder: "rgba(255,255,255,.18)",
 
-  fabBg: "rgba(220,38,38,.14)",
-  fabBgHover: "rgba(220,38,38,.22)",
-  fabBorder: "rgba(220,38,38,.45)",
+  fabBg: "rgba(220,38,38,.16)",
+  fabBgHover: "rgba(220,38,38,.26)",
+  fabBorder: "rgba(220,38,38,.5)",
 
-  // Shadows (dark tuned)
-  shadowSm: "0 1px 3px rgba(0,0,0,.5)",
-  shadowMd: "0 6px 22px rgba(220,38,38,.35), 0 10px 30px rgba(0,0,0,.65)",
-  shadowLg: "0 24px 70px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.04)",
+  // Shadows (deep, clean)
+  shadowSm: "0 1px 3px rgba(0,0,0,.6)",
+  shadowMd: "0 6px 22px rgba(220,38,38,.35), 0 12px 34px rgba(0,0,0,.7)",
+  shadowLg: "0 28px 80px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.04)",
 
   // Sizes
   radiusSm: "10px",
@@ -278,14 +279,15 @@ const THEME = {
   fontSizeMd: "13px",
   fontSizeLg: "15px",
 
-  // Toast colors
-  toastBg: "#0b0f14",
+  // Toast
+  toastBg: "#0e0e10",
   toastBorderInfo: "rgba(220,38,38,.45)",
   toastBorderSuccess: "rgba(34,197,94,.45)",
   toastBorderError: "rgba(239,68,68,.5)",
-  toastText: "#f9fafb",
-  toastShadow: "0 10px 28px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.04)",
+  toastText: "#ffffff",
+  toastShadow: "0 12px 32px rgba(0,0,0,.9), 0 0 0 1px rgba(255,255,255,.04)",
 };
+
 
 // CSS vars generator (dark)
 function themeToCssVars(theme) {
