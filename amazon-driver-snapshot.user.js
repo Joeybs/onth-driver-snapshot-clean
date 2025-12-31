@@ -241,51 +241,57 @@
     }
   }
 
-  // Centralized theme object for easy customization - Light mode with red accents
-  const THEME = {
-    // Core colors (light mode)
-    bg: "#ffffff",
-    bgSubtle: "#f8fafc",
-    bgMuted: "#e2e8f0",
-    text: "#212529",
-    textStrong: "#0f2535",
-    textMuted: "#475569",
-    border: "rgba(134,164,175,.8)",
-    borderStrong: "#0f2535",
-    // Red accents for primary
-    primary: "#dc2626",  // Red-600
-    primaryHover: "#b91c1c",  // Red-700
-    buttonNeutralBg: "#ccd5de",
-    buttonNeutralText: "#02080e",
-    buttonNeutralBorder: "#02080e",
-    fabBg: "#fef2f2",  // Red-50
-    fabBgHover: "#fee2e2",  // Red-100
-    fabBorder: "rgba(220,38,38,.4)",  // Red-600 with opacity
-    // Shadows (keeping similar)
-    shadowSm: "0 1px 3px rgba(0,0,0,.06)",
-    shadowMd: "0 4px 14px rgba(220,38,38,.18), 0 8px 26px rgba(0,0,0,.08)",  // Added red tint
-    shadowLg: "0 20px 64px rgba(0,0,0,.10), 0 0 0 1px rgba(15,23,42,.06)",
-    // Sizes
-    radiusSm: "10px",
-    radiusMd: "12px",
-    radiusLg: "16px",
-    fontSizeSm: "12px",
-    fontSizeMd: "13px",
-    fontSizeLg: "15px",
-    // Toast colors with red
-    toastBg: "#ffffff",
-    toastBorderInfo: "rgba(220,38,38,.32)",  // Red with opacity
-    toastBorderSuccess: "rgba(34,197,94,.45)",
-    toastBorderError: "rgba(239,68,68,.45)",
-    toastText: "#0f2535",
-    toastShadow: "0 8px 24px rgba(0,0,0,.12), 0 0 0 1px rgba(15,23,42,.06)",
-  };
+  // Centralized theme object — Dark mode with red accents
+const THEME = {
+  // Core colors (dark mode)
+  bg: "#0b0f14",
+  bgSubtle: "#111827",
+  bgMuted: "#1f2933",
+  text: "#e5e7eb",
+  textStrong: "#f9fafb",
+  textMuted: "#9ca3af",
+  border: "rgba(148,163,184,.35)",
+  borderStrong: "rgba(226,232,240,.45)",
 
-  // Function to generate CSS variables from THEME
-  function themeToCssVars(theme) {
-    const lines = Object.entries(theme).map(([k, v]) => `--onth-${k}: ${v};`);
-    return `:root {\n  color-scheme: light;\n  ${lines.join("\n  ")}\n}\n`;
-  }
+  // Red accents
+  primary: "#dc2626",       // Red-600
+  primaryHover: "#b91c1c",  // Red-700
+
+  buttonNeutralBg: "#1f2933",
+  buttonNeutralText: "#f9fafb",
+  buttonNeutralBorder: "rgba(148,163,184,.4)",
+
+  fabBg: "rgba(220,38,38,.14)",
+  fabBgHover: "rgba(220,38,38,.22)",
+  fabBorder: "rgba(220,38,38,.45)",
+
+  // Shadows (dark tuned)
+  shadowSm: "0 1px 3px rgba(0,0,0,.5)",
+  shadowMd: "0 6px 22px rgba(220,38,38,.35), 0 10px 30px rgba(0,0,0,.65)",
+  shadowLg: "0 24px 70px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.04)",
+
+  // Sizes
+  radiusSm: "10px",
+  radiusMd: "12px",
+  radiusLg: "16px",
+  fontSizeSm: "12px",
+  fontSizeMd: "13px",
+  fontSizeLg: "15px",
+
+  // Toast colors
+  toastBg: "#0b0f14",
+  toastBorderInfo: "rgba(220,38,38,.45)",
+  toastBorderSuccess: "rgba(34,197,94,.45)",
+  toastBorderError: "rgba(239,68,68,.5)",
+  toastText: "#f9fafb",
+  toastShadow: "0 10px 28px rgba(0,0,0,.85), 0 0 0 1px rgba(255,255,255,.04)",
+};
+
+// CSS vars generator (dark)
+function themeToCssVars(theme) {
+  const lines = Object.entries(theme).map(([k, v]) => `--onth-${k}: ${v};`);
+  return `:root {\n  color-scheme: dark;\n  ${lines.join("\n  ")}\n}\n`;
+}
 
   // Generate STYLES using variables, with adjusted column widths
   const STYLES = `
