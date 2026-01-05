@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Amazon Driver Snapshot
 // @namespace    https://github.com/onth/scripts
-// @version      2.2.3
+// @version      2.3.0
 // @description  In-page Driver Snapshot drawer. Click driver → open itinerary → hide completed → copy Nth *remaining* stop address (default 3) → auto-back. Optimized for performance, reliability, and accessibility.
 // @match        https://logistics.amazon.com/operations/execution/itineraries*
 // @run-at       document-idle
@@ -89,10 +89,25 @@
 
   const debounce = (fn, delay) => {
     let timeoutId;
-    return function debounced(...args) {
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(() => fn.apply(this, args), delay);
+    const debounced = function(...args) {
+      if (timeoutId != null) {
+        clearTimeout(timeoutId);
+      }
+      timeoutId = setTimeout(() => {
+        fn.apply(this, args);
+        timeoutId = null; // Clear reference after execution
+      }, delay);
     };
+    
+    // Add cleanup method to debounced function
+    debounced.cancel = () => {
+      if (timeoutId != null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+    
+    return debounced;
   };
 
   const validateStopNumber = (value) => {
@@ -487,10 +502,16 @@ ${themeToCssVars(THEME)}
 
       d.style.opacity = "1";
       d.style.transform = "translateY(0)";
-      clearTimeout(d.__t);
+      
+      // Clear previous timeout to prevent memory leaks
+      if (d.__t != null) {
+        clearTimeout(d.__t);
+      }
+      
       d.__t = setTimeout(() => {
         d.style.opacity = "0";
         d.style.transform = "translateY(10px)";
+        d.__t = null; // Clear reference after execution
       }, 1300);
     } catch (err) {
       log.error("Toast error:", err);
@@ -539,37 +560,51 @@ ${themeToCssVars(THEME)}
       return false;
     }
 
+    // Try modern Clipboard API first - works best with user gestures
     try {
       await navigator.clipboard.writeText(text);
+      log.debug("Clipboard API succeeded");
       return true;
     } catch (err) {
       log.warn("Clipboard API failed:", err);
     }
 
+    // Fallback to execCommand - more reliable for async contexts
     try {
       const ta = document.createElement("textarea");
       ta.value = text;
       ta.setAttribute("readonly", "");
       ta.style.cssText = "position:fixed;left:-9999px;opacity:0;pointer-events:none";
       document.body.appendChild(ta);
+      
+      // Focus and select to create user gesture context
+      ta.focus();
       ta.select();
       ta.setSelectionRange(0, text.length);
+      
       const success = document.execCommand("copy");
       document.body.removeChild(ta);
-      if (success) return true;
+      
+      if (success) {
+        log.debug("execCommand copy succeeded");
+        return true;
+      }
     } catch (err) {
       log.warn("execCommand copy failed:", err);
     }
 
+    // Last resort: Tampermonkey/console copy function
     try {
       if (typeof copy === "function") {
         copy(text);
+        log.debug("copy() function succeeded");
         return true;
       }
     } catch (err) {
       log.warn("copy() function failed:", err);
     }
 
+    log.error("All clipboard methods failed");
     return false;
   };
 
@@ -852,11 +887,30 @@ ${themeToCssVars(THEME)}
   }
 
   function getStopHeaders() {
-    return [
+    // Try ARIA-based selectors first (most stable)
+    let headers = [
+      ...document.querySelectorAll(
+        '[role="button"][aria-expanded], [role="button"][aria-controls^="expandable"], button[aria-controls^="expandable"]'
+      ),
+    ].filter((el) => el.offsetWidth && el.offsetHeight);
+    
+    if (headers.length > 0) {
+      log.debug(`Found ${headers.length} stop headers via ARIA attributes`);
+      return headers;
+    }
+    
+    // Fallback to original selector
+    headers = [
       ...document.querySelectorAll(
         'div[role="button"][aria-controls^="expandable"], button[aria-controls^="expandable"]'
       ),
     ].filter((el) => el.offsetWidth && el.offsetHeight);
+    
+    if (headers.length === 0) {
+      log.debug("No stop headers found");
+    }
+    
+    return headers;
   }
 
   function inDriverView() {
@@ -928,33 +982,58 @@ ${themeToCssVars(THEME)}
         'a[href*="itineraryId="], a[href*="/itineraries/"], a[href*="execution/itineraries"]'
       ) || row.querySelector("a,button,[role='button']");
 
+    // Prioritized event sequence to prevent race conditions
     const attempts = [
+      // Attempt 1: Standard click with URL check
       async () => {
         row.scrollIntoView({ behavior: "smooth", block: "center" });
         await sleep(CONFIG.BASE_SLEEP);
         clickAtCenter(row);
+        log.debug("Dispatched click event");
+      },
+      // Attempt 2: Pointer tap (more realistic user interaction)
+      async () => {
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
         await sleep(CONFIG.BASE_SLEEP);
-        dblClickAtCenter(row);
+        pointerTap(row);
+        log.debug("Dispatched pointer events");
+      },
+      // Attempt 3: Enter key fallback
+      async () => {
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
         await sleep(CONFIG.BASE_SLEEP);
         pressEnter(row);
+        log.debug("Dispatched Enter key event");
+      },
+      // Attempt 4: Double-click as last resort
+      async () => {
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+        await sleep(CONFIG.BASE_SLEEP);
+        dblClickAtCenter(row);
+        log.debug("Dispatched double-click event");
       },
     ];
 
     for (let i = 0; i < attempts.length; i++) {
       log.info(`Click attempt ${i + 1}/${attempts.length}`);
       await attempts[i]();
+      
+      // Wait and check for URL change
       const ok = await waitFor(() => (inDriverView() ? true : null), {
         timeout: 12000,
         interval: 160,
       });
+      
       if (ok) {
         log.info("Successfully entered driver view");
         return row;
       }
+      
+      log.debug(`Attempt ${i + 1} did not trigger navigation, trying next method`);
       await sleep(220);
     }
 
-    log.error("Click attempt failed");
+    log.error("All click attempts failed");
     return null;
   }
 
@@ -970,21 +1049,45 @@ ${themeToCssVars(THEME)}
   }
 
   function findHideToggle() {
-    let el = document.querySelector('input[role="switch"][type="checkbox"]');
-    if (el && /hide completed/i.test(el.closest("label,div,span")?.textContent || "")) {
+    // Try ARIA-based selector first (most reliable)
+    let el = document.querySelector('input[role="switch"][type="checkbox"][aria-label*="hide" i]');
+    if (el) {
+      log.debug("Found hide toggle via ARIA label");
       return el;
     }
 
+    // Try data attributes
+    el = document.querySelector('input[role="switch"][type="checkbox"][data-testid*="hide" i]');
+    if (el) {
+      log.debug("Found hide toggle via data-testid");
+      return el;
+    }
+
+    // Fallback to text-based search with partial matching
+    el = document.querySelector('input[role="switch"][type="checkbox"]');
+    if (el && /hide\s*completed/i.test(el.closest("label,div,span")?.textContent || "")) {
+      log.debug("Found hide toggle via text content (primary)");
+      return el;
+    }
+
+    // Broader search for switches with more tolerant text matching
     const cands = [
       ...document.querySelectorAll(
         'input[role="switch"][type="checkbox"], input[type="checkbox"][role="switch"], [role="switch"]'
       ),
     ];
     el = cands.find((e) =>
-      /hide completed stops/i.test(
+      /hide\s*completed\s*stops/i.test(
         e.closest("label,div,span,section,form")?.textContent || ""
       )
     );
+    
+    if (el) {
+      log.debug("Found hide toggle via text content (extended search)");
+    } else {
+      log.warn("Hide toggle not found with any selector strategy");
+    }
+    
     return el || null;
   }
 
@@ -1013,17 +1116,30 @@ ${themeToCssVars(THEME)}
   }
 
   async function scrollToHideArea() {
-    const search =
-      document.querySelector('input[placeholder="Search..."]') ||
-      [...document.querySelectorAll("input,button,[role='switch']")].find((n) =>
-        /hide completed stops/i.test(
-          n.closest("label,div,span,section,form")?.textContent || ""
-        )
-      );
+    // Priority 1: Search input with data attributes
+    let search = document.querySelector('input[placeholder="Search..."], input[data-testid*="search" i], input[aria-label*="search" i]');
+    
+    // Priority 2: Hide toggle area with ARIA or data attributes
+    if (!search) {
+      search = [...document.querySelectorAll("input,button,[role='switch']")].find((n) => {
+        const ariaLabel = n.getAttribute("aria-label") || "";
+        const dataTestId = n.getAttribute("data-testid") || "";
+        const textContent = n.closest("label,div,span,section,form")?.textContent || "";
+        
+        return /hide\s*completed\s*stops/i.test(ariaLabel) ||
+               /hide\s*completed\s*stops/i.test(dataTestId) ||
+               /hide\s*completed\s*stops/i.test(textContent);
+      });
+    }
+    
     if (search) {
       search.scrollIntoView({ behavior: "smooth", block: "center" });
+      log.debug("Scrolled to hide area target element");
       return;
     }
+    
+    // Fallback: Scroll down incrementally
+    log.debug("Hide area element not found, using incremental scroll");
     for (let i = 0; i < 5; i++) {
       window.scrollBy({ top: window.innerHeight * 0.5, behavior: "smooth" });
       await sleep(140);
@@ -1111,8 +1227,29 @@ ${themeToCssVars(THEME)}
 
   function findAddressInPanel(panel) {
     if (!panel) return null;
-    const quick = panel.querySelector('[data-testid*="address" i], [data-attr*="address" i], [aria-label*="address" i]');
-    if (quick?.innerText?.trim()) return quick;
+    
+    // Priority 1: ARIA label attributes (most stable)
+    let addressNode = panel.querySelector('[aria-label*="address" i]');
+    if (addressNode?.innerText?.trim()) {
+      log.debug("Found address via ARIA label");
+      return addressNode;
+    }
+    
+    // Priority 2: Data attributes (stable)
+    addressNode = panel.querySelector('[data-testid*="address" i], [data-attr*="address" i]');
+    if (addressNode?.innerText?.trim()) {
+      log.debug("Found address via data attributes");
+      return addressNode;
+    }
+    
+    // Priority 3: ID or class attributes with partial matching
+    addressNode = panel.querySelector('[id*="address" i], [class*="address" i]');
+    if (addressNode?.innerText?.trim() && /,/.test(addressNode.innerText)) {
+      log.debug("Found address via ID/class attributes");
+      return addressNode;
+    }
+    
+    // Priority 4: Search for "Address" label and find adjacent content
     const nodes = [...panel.querySelectorAll("div,span,p,li,td")].filter(
       (n) => n?.innerText?.trim()
     );
@@ -1121,15 +1258,26 @@ ${themeToCssVars(THEME)}
       const idx = nodes.indexOf(label);
       for (let k = idx + 1; k < Math.min(idx + 12, nodes.length); k++) {
         const t = nodes[k].innerText.trim();
-        if (t && /,/.test(t)) return nodes[k];
+        if (t && /,/.test(t)) {
+          log.debug("Found address via label proximity");
+          return nodes[k];
+        }
       }
     }
-    return (
-      nodes.find((x) => {
-        const t = x.innerText || "";
-        return /,/.test(t);
-      }) || null
-    );
+    
+    // Priority 5: Heuristic search - look for comma-separated text (least stable)
+    addressNode = nodes.find((x) => {
+      const t = x.innerText || "";
+      return /,/.test(t) && t.length > 10; // Minimum length to avoid false positives
+    }) || null;
+    
+    if (addressNode) {
+      log.debug("Found address via heuristic search");
+    } else {
+      log.warn("Address not found in panel");
+    }
+    
+    return addressNode;
   }
 
   async function collectRemainingStopsNth(nthRemaining = 3) {
@@ -1225,20 +1373,47 @@ ${themeToCssVars(THEME)}
     }
 
     const findBackBtn = () => {
+      // Priority 1: ARIA labels (most stable)
+      let btn = [...document.querySelectorAll("button,a,[role='button']")].find((el) => {
+        const ariaLabel = el.getAttribute("aria-label") || "";
+        return /^(back|return|go back|back to list)$/i.test(ariaLabel.trim());
+      });
+      
+      if (btn) {
+        log.debug("Found back button via ARIA label");
+        return btn;
+      }
+      
+      // Priority 2: Title attribute
+      btn = [...document.querySelectorAll("button,a,[role='button']")].find((el) => {
+        const title = el.getAttribute("title") || "";
+        return /^(back|return|go back|back to list)$/i.test(title.trim());
+      });
+      
+      if (btn) {
+        log.debug("Found back button via title attribute");
+        return btn;
+      }
+      
+      // Priority 3: Text content with partial matching
       const cands = [...document.querySelectorAll("button,a,[role='button']")];
-      return (
-        cands.find((el) => {
-          const t = (
-            el.getAttribute("aria-label") ||
-            el.getAttribute("title") ||
-            el.textContent ||
-            ""
-          ).trim();
-          return (
-            /^(back|return|go back|back to list)$/i.test(t) || /\bback\b/i.test(t)
-          );
-        }) || null
-      );
+      btn = cands.find((el) => {
+        const t = (
+          el.getAttribute("aria-label") ||
+          el.getAttribute("title") ||
+          el.textContent ||
+          ""
+        ).trim();
+        return /\bback\b/i.test(t);
+      });
+      
+      if (btn) {
+        log.debug("Found back button via text content");
+      } else {
+        log.warn("Back button not found");
+      }
+      
+      return btn || null;
     };
 
     for (let i = 0; i < CONFIG.RETRY_ATTEMPTS; i++) {
@@ -1600,22 +1775,37 @@ ${themeToCssVars(THEME)}
     listeners: [],
     intervals: [],
     observers: [],
+    timeouts: [], // Track timeouts for proper cleanup
 
     addListener(element, event, handler, options) {
-      if (!element) return;
+      if (!element) {
+        log.warn("Attempted to add listener to null element");
+        return;
+      }
       element.addEventListener(event, handler, options);
       this.listeners.push({ element, event, handler, options });
     },
 
     addInterval(id) {
-      this.intervals.push(id);
+      if (id != null) {
+        this.intervals.push(id);
+      }
+    },
+
+    addTimeout(id) {
+      if (id != null) {
+        this.timeouts.push(id);
+      }
     },
 
     addObserver(observer) {
-      this.observers.push(observer);
+      if (observer) {
+        this.observers.push(observer);
+      }
     },
 
     removeAll() {
+      // Remove all event listeners
       for (const { element, event, handler, options } of this.listeners) {
         try {
           element?.removeEventListener(event, handler, options);
@@ -1625,11 +1815,27 @@ ${themeToCssVars(THEME)}
       }
       this.listeners = [];
 
+      // Clear all intervals
       for (const id of this.intervals) {
-        clearInterval(id);
+        try {
+          clearInterval(id);
+        } catch (err) {
+          log.warn("Failed to clear interval:", err);
+        }
       }
       this.intervals = [];
 
+      // Clear all timeouts
+      for (const id of this.timeouts) {
+        try {
+          clearTimeout(id);
+        } catch (err) {
+          log.warn("Failed to clear timeout:", err);
+        }
+      }
+      this.timeouts = [];
+
+      // Disconnect all observers
       for (const observer of this.observers) {
         try {
           observer?.disconnect();
@@ -1639,12 +1845,27 @@ ${themeToCssVars(THEME)}
       }
       this.observers = [];
 
-      log.info("Cleanup completed");
+      log.info("Cleanup completed: removed all listeners, intervals, timeouts, and observers");
     }
   };
 
   if (typeof window !== 'undefined') {
     window.addEventListener('beforeunload', () => cleanup.removeAll());
+    
+    // Additional cleanup on page visibility change to prevent resource leaks
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        log.debug("Page hidden, pausing observers");
+        // Temporarily disconnect observers when page is hidden
+        for (const observer of cleanup.observers) {
+          try {
+            observer?.disconnect();
+          } catch (err) {
+            log.warn("Failed to disconnect observer on visibility change:", err);
+          }
+        }
+      }
+    });
   }
 
   function injectUI() {
@@ -1874,6 +2095,7 @@ ${themeToCssVars(THEME)}
 
   cleanup.addInterval(initInterval);
 
+  // Optimized MutationObserver with debouncing
   const observer = new MutationObserver(() => {
     if (observer.__pending) return;
     observer.__pending = true;
@@ -1883,14 +2105,27 @@ ${themeToCssVars(THEME)}
     });
   });
 
-  if (document.documentElement) {
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
-    cleanup.addObserver(observer);
-  }
+  // Target more specific container or fall back to body to reduce observation scope
+  const observeDOM = () => {
+    if (document.body) {
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+      cleanup.addObserver(observer);
+      log.debug("MutationObserver attached to document.body");
+    } else if (document.documentElement) {
+      observer.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+      });
+      cleanup.addObserver(observer);
+      log.debug("MutationObserver attached to document.documentElement (fallback)");
+    }
+  };
 
-  log.info("Driver Snapshot v2.2.3 loaded");
+  observeDOM();
+
+  log.info("Driver Snapshot v2.3.0 loaded");
   log.debug("Debug mode:", !!window.__ONTH_DEBUG__);
 })();
